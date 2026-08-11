@@ -686,13 +686,176 @@ git push -u origin main
 git push origin staging                         # push staging too
 ```
 
-First run on `main` triggers `test` + `deploy-prod`. On subsequent development you'll typically push to `staging` first (see Section 6). Watch:
+First run on `main` triggers `test` + `deploy-prod`. On subsequent development you'll typically push to `staging` first (see Section 7). Watch:
 
 1. **GitHub Actions tab** → CI/CD workflow runs. Job graph shows `test` → `deploy-prod`.
 2. **Coolify UI** (instructor can share) → sentiment-app prod deploys.
 3. `curl http://Group1.ml-capstone.cs.byu.edu/health` returns your `/health` JSON. (VPN required.)
 
-## Section 6: The day-to-day update–test–PR–deploy workflow
+## Section 6: Making your deploys fast (when they get slow)
+
+When you first ship the app from Section 1, your deploy cycle will feel great — small image, small dependencies, ~30 seconds from push to running container. But the moment you add a real ML dependency (`torch`, `transformers`, a HuggingFace model, `spacy` with a language pack, etc.), each deploy suddenly takes **5-6 minutes**. That's slow enough to break your development flow.
+
+This section explains why that happens and the pattern professional teams use to fix it. It's genuinely important — if your project uses local ML models, you'll hit this problem, and knowing the fix is a legitimate industry skill.
+
+### Why deploys get slow
+
+Look at what happens when Coolify builds your image on every push:
+
+1. Pull the Python base image (`python:3.12-slim` — small, ~50 MB, fast)
+2. `pip install -r requirements.txt` — downloads and installs everything on your dependency list. If that includes `torch`, that's a 750 MB download and ~2-3 minutes of installation.
+3. `RUN python -c "AutoModel.from_pretrained('...')"` — if you pre-download an ML model, another ~500 MB and ~1 minute.
+4. `COPY main.py .` — your 8 KB of actual code. ~0.01 seconds.
+5. Container starts, model loads into VRAM. ~30-60 seconds.
+
+Steps 2 and 3 dominate. On every single push. Even when you only changed `main.py`. Even when you added a print statement. That's the problem.
+
+### The core concept — docker layer caching
+
+Every line in a `Dockerfile` produces a **layer**. Docker caches layers by their input hash. If nothing that affects a layer has changed, Docker reuses the cached layer instead of rebuilding it. Fast.
+
+But if any input to a layer changes, that layer AND every layer after it invalidate. Docker has to rebuild them all.
+
+**The strategic implication:** put the stuff that changes rarely (dependencies) at the top of the Dockerfile, and the stuff that changes often (your code) at the bottom. That way `COPY main.py` invalidating doesn't force a torch reinstall.
+
+The reference app already does this correctly — `requirements.txt` is copied and installed before `main.py` is copied. If only `main.py` changes, only the `COPY main.py` layer needs to rebuild. **In principle.**
+
+### Why that isn't enough
+
+The problem: **Docker's layer cache is local to the machine doing the build.** If Coolify's build container has the cache (which it does — same rigel host, persistent), all good. But if the build happens on an ephemeral runner (GitHub Actions VMs, a fresh CI worker), there's no cache. Every build starts from scratch — torch reinstalls, model re-downloads.
+
+For classroom deploys through Coolify, this means: the first-ever deploy is slow (Coolify pulls the base image once), but subsequent code-only deploys should hit the cache and be fast.
+
+Except… we noticed a real deploy still took 5 minutes even after Coolify had the layers cached. Why?
+
+Because Coolify actually rebuilds from scratch on each deploy in the default configuration, discarding intermediate layers. Some CI/CD platforms do this for cleanliness; the tradeoff is speed.
+
+### The two-Dockerfile pattern
+
+The fix professional ML teams use: **split your Dockerfile into two files.**
+
+```
+Dockerfile.base   ← heavy stuff: Python + torch + transformers + HF model
+Dockerfile        ← thin: FROM the base image + COPY main.py
+```
+
+**Base image (`Dockerfile.base`)** — contains everything that changes rarely. It gets built once and pushed to a container registry (like GitHub Container Registry — `ghcr.io`). The resulting image is ~1.8 GB.
+
+**App image (`Dockerfile`)** — starts with `FROM ghcr.io/<you>/<your-base>:latest` and just adds `main.py`. Rebuilds on every push. Since almost nothing new happens (base is already in the registry, only one tiny `COPY` runs), it's a few seconds of work.
+
+The magic: **when you push a code-only change, Coolify does not rebuild the base image.** It pulls the already-published base image (fast — that's a local cache hit on rigel), applies the tiny `COPY main.py` layer, and swaps in the new container. Total: seconds instead of minutes.
+
+### Setting it up in your own repo
+
+If your app has a heavy dependency (torch, tensorflow, a large HF model, spacy language packs, etc.), do this:
+
+**1. Create a `Dockerfile.base`** with the heavy stuff:
+
+```dockerfile
+FROM python:3.12-slim
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# If you use a HuggingFace model, pre-download it here.
+# Single-line RUN — do NOT use backslash continuations; some CI/CD tools
+# inject synthetic ARG directives that break multi-line RUN.
+ARG LOCAL_MODEL_ID=<your-hf-model-id>
+ENV LOCAL_MODEL_ID=${LOCAL_MODEL_ID}
+RUN python -c "from transformers import AutoTokenizer, AutoModelForSequenceClassification; AutoTokenizer.from_pretrained('${LOCAL_MODEL_ID}'); AutoModelForSequenceClassification.from_pretrained('${LOCAL_MODEL_ID}')"
+```
+
+**2. Change your `Dockerfile`** to start from the base:
+
+```dockerfile
+FROM ghcr.io/<your-github-username>/<your-repo>-base:latest
+WORKDIR /app
+COPY main.py .
+EXPOSE 8000
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+**3. Add a workflow file** `.github/workflows/build-base.yml` that builds and pushes the base image only when it needs to:
+
+```yaml
+name: Build base image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - requirements.txt
+      - Dockerfile.base
+      - .github/workflows/build-base.yml
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.base
+          push: true
+          tags: ghcr.io/<your-username>/<your-repo>-base:latest
+          cache-from: type=registry,ref=ghcr.io/<your-username>/<your-repo>-base:buildcache
+          cache-to: type=registry,ref=ghcr.io/<your-username>/<your-repo>-base:buildcache,mode=max
+```
+
+**4. Make the pushed image public** on GitHub Container Registry (packages tab of your GitHub profile). Coolify's build container needs to pull it without auth.
+
+**5. First push** — the base workflow runs, publishing the base image. Takes 5-8 minutes because there's no cache yet. Subsequent runs of the base workflow use the `buildcache` tag and take ~1-2 minutes.
+
+**6. Code-only pushes** — the regular deploy pipeline runs, Coolify pulls the (now cached) base image, adds `main.py`, deploys. Total: under a minute.
+
+### The tradeoffs — is this worth it?
+
+**Do it if:**
+- Your dependencies total more than ~500 MB
+- Your dependencies change less often than your code (typical for ML apps)
+- Deploy latency is affecting your development flow
+
+**Don't bother if:**
+- Your app is small — a plain FastAPI service with no ML deps is fine as a single Dockerfile
+- You add pip dependencies as often as you change code (the base image would rebuild constantly, defeating the point)
+- Deploy latency doesn't matter for your use case (batch jobs, once-a-week releases)
+
+For most students building simple web APIs, a single Dockerfile is fine. **You only need this pattern once your app gets heavy.** Recognize the smell — 5+ minute deploys where 99% of the time is spent reinstalling dependencies that didn't change — and reach for this pattern when you see it.
+
+### Alternative patterns you'll see in industry
+
+For completeness, this isn't the only way. Real production ML systems also use:
+
+**Model-as-a-service.** Don't ship the model in your app at all — call a shared service. This is what the classroom does for `classroom-chat`: Qwen3-Coder-Next runs as a long-lived vLLM service on castor+pollux, and your app is a tiny client that hits `http://ml-capstone.cs.byu.edu:4000/v1`. Your app image goes from 3 GB to 100 MB, no GPU allocation needed. Trade-off: you don't own the model server, and if it goes down, you go down.
+
+**Persistent volume mount.** Mount the model weights from a shared filesystem at runtime instead of baking them into the image. Image stays tiny; container startup does the loading. Trade-off: needs a persistent-volume system (Kubernetes PV, NFS, etc.) — Coolify doesn't do this out of the box.
+
+**Just accept slow deploys, invest in local testing.** If deploys are infrequent (like a weekly release), the 5-minute cycle doesn't matter much. Put your effort into a fast local dev loop (`test-local.sh` in this pattern) so you rarely need to deploy.
+
+### The full worked example
+
+The classroom's reference app — `github.com/quinnsnell/sentiment-test-app` — implements this pattern end-to-end. Its README's "How this app is packaged (and why)" section has:
+
+- Exact file contents for `Dockerfile.base`, `Dockerfile`, and the base-build workflow
+- Actual performance numbers (before/after)
+- A table of where docker caches live in different parts of the CI/CD pipeline
+- More on why the pattern works and when it doesn't
+
+Read that once, especially if your project imports torch or transformers. It'll save you real time.
+
+## Section 7: The day-to-day update–test–PR–deploy workflow
 
 The full workflow, from a feature idea to code in production:
 
