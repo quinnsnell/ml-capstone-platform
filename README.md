@@ -41,7 +41,7 @@ Students never see host names — they interact only with `ml-capstone.cs.byu.ed
 ## What lives in this repo
 
 ```
-qwen-coder-cluster/
+ml-capstone-platform/
 ├── README.md              ← you are here
 ├── student-guide.md       Student setup: editor + deploy
 ├── admin-guide.md         Admin setup: cluster install + management
@@ -88,7 +88,7 @@ Model aliases exposed by LiteLLM:
 - Cluster smoke test hits 14/14
 
 **Planned:**
-- `ml-capstone-admin.cs.byu.edu` DNS + Coolify OAuth (follow-up ticket sent 2026-08-11; see [`tickets/active-ml-capstone-admin-dns.md`](tickets/active-ml-capstone-admin-dns.md))
+- `ml-capstone-admin.cs.byu.edu` DNS + Coolify OAuth (follow-up ticket sent 2026-08-11; see [`tickets/active-ml-capstone-admin-alias.md`](tickets/active-ml-capstone-admin-alias.md))
 - Self-serve Coolify accounts per student group (via GitHub OAuth once admin DNS is up)
 - Self-hosted GitHub Actions runner (for integration tests against staging URLs)
 
