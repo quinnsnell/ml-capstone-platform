@@ -8,9 +8,7 @@ Historical + active tickets we've sent (or plan to send) to BYU CS IT. Kept for 
 
 ## Active
 
-| File | What it asks for | Sent |
-|---|---|---|
-| [`active-ml-capstone-admin-alias.md`](active-ml-capstone-admin-alias.md) | Internal DNS alias for `ml-capstone-admin.cs.byu.edu` → rigel (follow-up after wildcard delivery) | 2026-08-11 |
+_None as of 2026-08-11._
 
 ## Archive (resolved or superseded)
 
@@ -21,7 +19,8 @@ Chronological order.
 | [`archive/2026-08-05-initial-request.md`](archive/2026-08-05-initial-request.md) | Public HTTPS reverse proxy for GitHub webhook via HAProxy | ✅ Delivered |
 | [`archive/2026-08-06-ssl-passthrough-reply.md`](archive/2026-08-06-ssl-passthrough-reply.md) | Our reply confirming SSL passthrough + wildcard cert request | ✅ Cert delivered |
 | [`archive/2026-08-07-haproxy-followup.md`](archive/2026-08-07-haproxy-followup.md) | Follow-up: HAProxy accepting but not forwarding SNI | ✅ Fixed |
-| [`archive/2026-08-10-ml-capstone-admin-and-wildcard.md`](archive/2026-08-10-ml-capstone-admin-and-wildcard.md) | Admin alias + wildcard `*.ml-capstone.cs.byu.edu` | ✅ Wildcard delivered 2026-08-11; ❌ admin alias pending (see active) |
+| [`archive/2026-08-10-ml-capstone-admin-and-wildcard.md`](archive/2026-08-10-ml-capstone-admin-and-wildcard.md) | Admin alias + wildcard `*.ml-capstone.cs.byu.edu` | ✅ Wildcard delivered 2026-08-11; admin alias in follow-up ticket |
+| [`archive/2026-08-11-ml-capstone-admin-alias.md`](archive/2026-08-11-ml-capstone-admin-alias.md) | Follow-up: internal DNS alias for `ml-capstone-admin.cs.byu.edu` → rigel | ✅ Delivered 2026-08-11 |
 
 ## Notes for future ticket drafts
 

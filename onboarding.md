@@ -139,10 +139,18 @@ Their code and git history are untouched — only Coolify state is reset.
 
 ## Bulk onboarding
 
-For onboarding many groups at once, the manual clicks in Coolify are the bottleneck. Consider scripting via Coolify's API:
+Use [`scripts/provision-teams.sh`](scripts/provision-teams.sh). It reads a roster CSV and idempotently creates Coolify teams, users, and their per-team `ml-capstone` server row via direct Postgres writes (Coolify's REST API doesn't cover team or user creation as of 4.2).
 
-- `POST /api/v1/teams` — create team
-- `POST /api/v1/applications/private-github-app` — create Application
-- `GET /api/v1/applications/{uuid}/webhooks` — retrieve deploy webhook URL
+```bash
+# On rigel, as a user in the docker group (or with sudo):
+./scripts/provision-teams.sh                          # dry-run against newest roster-*.csv
+./scripts/provision-teams.sh --roster path.csv        # explicit roster
+./scripts/provision-teams.sh --check-schema           # dump DB layout before trusting the SQL
+./scripts/provision-teams.sh --roster path.csv --apply  # execute
+```
 
-A provisioning script is planned but not yet written; when it exists, it'll live at `scripts/provision-group.sh`.
+CSV columns: `team_name,email,name,github_username`. One row per (team, user) pair — multi-row-per-user is fine (a user in multiple teams gets multiple rows). See `roster-example.csv`.
+
+After provisioning: students sign in via GitHub OAuth (email on their GitHub account must match their roster row) and self-create their Projects, Environments, and Applications per [`student-guide.md`](student-guide.md) → Part B → Setup section.
+
+Applications are still created by students (Coolify's API supports app creation but classroom pedagogy is better if students walk the UI themselves the first time).
