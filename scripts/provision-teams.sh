@@ -171,8 +171,8 @@ VALUES ('$e_name', '$e_email', NOW(), '$PLACEHOLDER_HASH', NOW(), NOW())
 ON CONFLICT (email) DO NOTHING;
 
 INSERT INTO teams (name, description, personal_team, created_at, updated_at)
-VALUES ('$e_team_name', 'Provisioned by provision-teams.sh${e_gh:+ (github=$e_gh)}', false, NOW(), NOW())
-ON CONFLICT (name) DO NOTHING;
+SELECT '$e_team_name', 'Provisioned by provision-teams.sh${e_gh:+ (github=$e_gh)}', false, NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM teams WHERE name = '$e_team_name');
 
 INSERT INTO team_user (team_id, user_id, role, created_at, updated_at)
 SELECT t.id, u.id, 'admin', NOW(), NOW()
