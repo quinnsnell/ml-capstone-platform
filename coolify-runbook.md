@@ -1,11 +1,14 @@
 # Classroom Deployment Platform — Coolify Runbook
 
-> **⚠️ Status:** This runbook was originally written assuming Cloudflare Tunnel + Let's Encrypt DNS-01 as the public entry point. That plan was **replaced** in Aug 2026 by CS IT's HAProxy (SNI passthrough) + a CS-provided `*.cs.byu.edu` wildcard cert. Sections §7 (Cloudflare Tunnel) and §8 (DNS-01 TLS) are **historical** — see [`admin-guide.md`](admin-guide.md) and [`onboarding.md`](onboarding.md) for the current path. Everything else in this runbook (Coolify install, GitHub App, per-group Applications, backup/recovery) is still accurate. Full modernization pass is scheduled.
+> **⚠️ Status:** Two big pivots happened in August 2026. Reflected inline where relevant, but calling them out here:
+>
+> 1. **Public entry point changed** from Cloudflare Tunnel + Let's Encrypt DNS-01 to **CS IT's HAProxy** (SNI passthrough on `haproxy1.cs.byu.edu`) + a CS-provided `*.cs.byu.edu` wildcard cert. Sections §7 (Cloudflare Tunnel) and §8 (DNS-01 TLS) are **historical**.
+> 2. **Student access model changed** from "students don't have Coolify accounts, admin creates Applications" to **self-serve teams via GitHub OAuth**. Instructor runs [`scripts/provision-teams.sh`](scripts/provision-teams.sh) from a roster CSV to create teams + user rows + server rows in one shot. Students sign in via GitHub OAuth (invite-gated) and create their own Projects → Environments → Applications per [`student-guide.md`](student-guide.md) → Part B → Setup. Section §11 below reflects this.
 
 This is the **server-side** setup guide for `rigel.cs.byu.edu`, the GPU-equipped front-end machine that hosts:
 
 - **LiteLLM** — the single proxy fronting the two GPU inference boxes (`castor`, `pollux`), exposed to students as `ml-capstone.cs.byu.edu:4000`
-- **Coolify** — a self-hosted, GitHub-webhook-driven "push to deploy" platform students use for their class projects; admin UI at `ml-capstone-admin.cs.byu.edu` (planned)
+- **Coolify** — a self-hosted, GitHub-webhook-driven "push to deploy" platform students use for their class projects; admin UI at `ml-capstone-admin.cs.byu.edu` (live, VPN-only, GitHub OAuth login)
 - **TLJH (The Littlest JupyterHub)** — JupyterHub for classes that need notebooks; runs behind Coolify's Traefik, uses qsynology-served LDAP homes (same auth as `castor` and `pollux`). **Currently deferred** — port 8080 conflicts with Coolify's own proxy; needs re-planning.
 - **4× NVIDIA A6000 GPUs** — available to student Docker containers via Coolify for GPU-accelerated deploys
 
@@ -34,8 +37,8 @@ Only one path on `rigel` is reachable from the public internet: the GitHub webho
 |                                                                               |
 |  Traefik (bundled with Coolify)  :80 / :443                                   |
 |      routes internal wildcard *.ml-capstone.cs.byu.edu -> student containers      |
-|      also reverse-proxies TLJH  (jupyter.class.byu.edu -> localhost:8080)     |
-|      TLS certs via Let's Encrypt DNS-01                                       |
+|      also routes ml-capstone-admin.cs.byu.edu -> coolify:8080 (admin UI)      |
+|      TLS termination via CS-provided *.cs.byu.edu DigiCert wildcard           |
 |                                                                               |
 |  LiteLLM              :4000        chat + FIM pools -> castor, pollux         |
 |  Coolify UI           :8000                                                   |
@@ -52,16 +55,15 @@ Only one path on `rigel` is reachable from the public internet: the GitHub webho
 |   |   (GPU 2 + GPU 3 free)                   |                                |
 |   +------------------------------------------+                                |
 |                                                                               |
-|  cloudflared (outbound-only daemon)                                           |
-|      one route:   ml-capstone.cs.byu.edu -> localhost:8000/webhooks/...        |
 +---------+---------------------------------------------------------------------+
           |                                                    ^
-          | (outbound: git clone, model pulls, npm, etc.)      | GitHub webhook
+          | (outbound: git clone, model pulls, npm, etc.)      | GitHub webhook + Actions
           v                                                    |
      Public internet                              +------------+-------------+
-          |                                       | Cloudflare edge          |
-          v                                       | (only for the webhook)   |
-     GitHub -------- webhook (push) ------------->+                          +
+          |                                       | CS IT HAProxy            |
+          v                                       | (haproxy1.cs.byu.edu)    |
+     GitHub -------- webhook (push) ------------->+ SNI passthrough :443     |
+                                                  | -> rigel :443 (Traefik)  |
                                                   +--------------------------+
 
                 Castor.cs.byu.edu                     Pollux.cs.byu.edu
@@ -234,7 +236,9 @@ Verify from a workstation on VPN: `curl http://ml-capstone.cs.byu.edu:4000/v1/mo
 
 ---
 
-## 7. Cloudflare Tunnel — the one public entry point
+## 7. Cloudflare Tunnel — **OBSOLETE (historical)**
+
+> **⚠️ Not used in the current architecture.** Replaced 2026-08-07 by CS IT's HAProxy doing SNI passthrough on `haproxy1.cs.byu.edu → rigel:443`. Kept below for context on the original design decision. If you're setting up the class today, skip to §11 and see [`admin-guide.md`](admin-guide.md) for the current public entry point.
 
 The tunnel exposes exactly one URL — the GitHub webhook path — with no inbound ports opened on `rigel`.
 
@@ -276,7 +280,9 @@ Verify: `curl -I https://ml-capstone.cs.byu.edu/webhooks/source/github/events` f
 
 ---
 
-## 8. TLS for Student Apps via DNS-01
+## 8. TLS for Student Apps via DNS-01 — **OBSOLETE (historical)**
+
+> **⚠️ Not used in the current architecture.** Replaced 2026-08-07 by a CS IT-provided `*.cs.byu.edu` DigiCert wildcard cert (valid 2026-07-09 → 2027-01-23; set a January renewal reminder). Certs live at `/data/coolify/proxy/certs/star_cs_byu_edu.{fullchain.pem,key}` and Traefik terminates TLS directly from those files. No Let's Encrypt, no DNS-01, no API tokens. See §11b in the older history if you need the Traefik dynamic config that wires the cert in.
 
 Traefik (inside Coolify) needs to prove control over `*.ml-capstone.cs.byu.edu` to Let's Encrypt, but we can't use HTTP-01 because port 80 is not public. DNS-01 works instead: Traefik drops a TXT record via the DNS provider's API.
 
@@ -335,37 +341,58 @@ Coolify UI: **Sources → New → GitHub App**. Fill in App ID, Client ID, Clien
 
 ---
 
-## 11. Team & User Model — students don't have Coolify accounts
+## 11. Team & User Model — self-serve teams via GitHub OAuth
 
-The intended student experience is **push-to-deploy**: student pushes to their assigned repo in the class org → Coolify's webhook fires → build + deploy → app appears at their assigned URL. Students never log in to Coolify.
+**Pivoted 2026-08-10.** The original plan was "students don't have Coolify accounts, admin creates all Applications." That's been superseded — students sign in via GitHub OAuth, land in a pre-provisioned team, and create their own Projects, Environments, and Applications through the UI.
 
-Only **admins** (instructor + TAs) have Coolify accounts. That means account provisioning is a one-time setup, not per-semester per-student.
+Why the pivot: GitHub OAuth eliminates the password-management friction of individual accounts. Students click "Sign in with GitHub" once, no new password. That flips the trade-off — self-serve is now roughly as easy to set up as admin-provisioning, but has much better long-term properties (nearly zero ongoing professor workload, higher educational value, matches industry pattern).
 
 ### Admin accounts
 
-- 1 root/admin account for the instructor (created during first-boot).
-- 1 admin account per TA — Coolify UI → **Team → Members → Invite**. Use email invites; TAs set their own password.
-- Optional: enable OAuth (**Settings → OAuth → GitHub**) so admins sign in with their GitHub account instead of managing another password.
+- **1 root/admin account** for the instructor (created during first-boot with email + password). This account survives OAuth linking — instructor's GitHub email matches the admin row → OAuth just becomes an alternate credential.
+- **TA accounts** created the same way as students below (a row in the roster CSV), or manually via Coolify UI → **Team → Members** if you want them in the root team specifically.
+- **Registration Allowed = OFF** (Coolify UI → Settings → Advanced). This is what makes OAuth invite-only: only email addresses already in the `users` table can complete sign-in. An unknown GitHub account gets "Registration is disabled" at the OAuth handoff.
 
-### Provisioning per-student Applications
+### Provisioning student teams (bulk)
 
-Before the semester starts (or as students are added to the class org):
+Use [`scripts/provision-teams.sh`](scripts/provision-teams.sh). One invocation reads a roster CSV and writes to Coolify's Postgres directly (Coolify's REST API doesn't cover team or user creation as of v4.2):
 
-1. In Coolify: **New Resource → Application → Private Repository (via GitHub App)** (or **Public Repository** if you don't want to require the GitHub App).
-2. Point at `<class-org>/<student-repo>` on branch `main`.
-3. Build pack: **Dockerfile** (or Nixpacks for auto-detection). Set any required env vars.
-4. Set the resource limits (§12).
-5. Deploy once so the app comes up. From then on every `git push` to `main` redeploys automatically via the webhook — the student never touches the UI.
+```bash
+# On rigel, in the docker group (or with sudo):
+./scripts/provision-teams.sh                                         # dry-run against newest roster-*.csv
+./scripts/provision-teams.sh --check-schema                          # inspect DB layout first
+./scripts/provision-teams.sh --roster roster-2026-fall.csv --apply   # execute
+```
 
-**Bulk-create shortcut:** for large classes, use Coolify's API — generate an API token in **Settings → API Tokens**, then POST to `POST /api/v1/applications` for each student repo. Reference in the Coolify API docs. Payload matches what the UI writes.
+Per row, the script (idempotently) creates:
 
-### If a student needs Coolify UI access
+1. **`users`** row (email lowercased — Coolify issue #6291 duplicates on case mismatch)
+2. **`teams`** row with `personal_team=false`
+3. **`team_user`** pivot with `role='admin'` (v4.2 broke the `member` role)
+4. **`servers`** row named `ml-capstone` pointing at `host.docker.internal` (Coolify talks to Docker via the socket, not SSH)
+5. **`server_settings`** row with `is_reachable=true`, `is_usable=true`, `is_sentinel_enabled=false` — without this the dashboard 500s
 
-Rare — usually just to view build logs. Options in order of preference:
+CSV shape (headers required): `team_name,email,name,github_username`. Multiple rows per email = user in multiple teams (this is how the "individual sandbox in Phase 1 → group team in Phase 2" arc works — Phase-2 rows get appended, Phase-1 rows stay).
 
-1. Point them at the app's own logs (their code's stdout) or their GitHub Actions if they add a CI workflow.
-2. Have an admin paste the failing deploy log into a ticket / Slack.
-3. If they truly need read-only Coolify access, invite them as a member of the admin team with read-only permissions.
+Naming convention:
+- Phase 1 (individual sandboxes): `<student-first-name> Sandbox` — e.g., `Alice Sandbox`
+- Phase 2 (groups): `Group N` — e.g., `Group 1`
+
+### What students do (in the UI)
+
+See [`student-guide.md`](student-guide.md) → Part B → **Setup: Sign in and create your Coolify Applications** for the 11-step lab. Summary:
+
+1. Sign in via GitHub OAuth at `https://ml-capstone-admin.cs.byu.edu`
+2. Switch to their team via the team switcher
+3. Install the `ml-capstone-coolify` GitHub App on their class repo
+4. Create Project → prod + staging Environments → one Application per Environment (both point at the same repo, different branches: `main` for prod, `staging` for staging)
+5. Assign domain per team's convention (`<team-slug>.ml-capstone.cs.byu.edu` and `<team-slug>-staging.ml-capstone.cs.byu.edu`)
+6. Turn off Coolify's auto-deploy on both Applications (GitHub Actions drives the deploys instead)
+7. Copy Deploy Webhook URLs + create an API token → paste as GitHub Actions secrets
+
+### Cleanup / reset (for term-end or mid-term)
+
+Not scripted yet — Phase 21 pending. For now: `docker exec coolify-db psql` and delete the team rows, or use the Coolify UI's Team → Danger Zone → Delete Team button.
 
 ---
 
@@ -393,7 +420,7 @@ Then `systemctl restart docker`.
 - CPU: 2 cores
 - Disk: 20 GB (persistent volumes count against this)
 
-Since students share the single admin team, quotas live at the Application level, not the Team level.
+Under the self-serve model (§11), each team is its own quota domain. Set the same defaults on every team's Application resources. Coolify doesn't currently offer team-level quotas that flow down to Applications automatically — students set them per-Application during the onboarding lab, or you extend `provision-teams.sh` to seed shared env vars that Applications inherit.
 
 **Disk pressure** — weekly prune:
 
