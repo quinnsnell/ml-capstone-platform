@@ -21,6 +21,10 @@
 #   Group 1,alice@byu.edu,Alice Smith,alice-s
 #   Group 1,bob@byu.edu,Bob Jones,bjones
 #
+# For each unique team, also provisions a Server row named 'rigel' pointing
+# at host.docker.internal so team members can create Applications. Idempotent
+# on (team_id, name='rigel') — safe to re-run.
+#
 # Multiple rows per user = user belongs to multiple teams. That's how the
 # "individual phase → group phase" arc works: Phase-1 rows stay, Phase-2 rows
 # get appended. Individual sandboxes live alongside group teams.
@@ -164,6 +168,9 @@ trap 'rm -f "$SQL_FILE"' EXIT
         e_name=${name//\'/\'\'}
         e_gh=${gh//\'/\'\'}
 
+        # Short unique uuid for the server row (Coolify format: 24 lowercase alnum)
+        server_uuid=$(head -c 4096 /dev/urandom | LC_ALL=C tr -dc 'a-z0-9' | head -c 24)
+
         cat <<SQL
 -- Row: team=$team_name, user=$email
 INSERT INTO users (name, email, email_verified_at, password, created_at, updated_at)
@@ -179,6 +186,13 @@ SELECT t.id, u.id, 'admin', NOW(), NOW()
 FROM teams t, users u
 WHERE t.name = '$e_team_name' AND u.email = '$e_email'
 ON CONFLICT (team_id, user_id) DO NOTHING;
+
+-- Server 'rigel' for team $team_name (idempotent on team_id + name; ignores soft-deletes)
+INSERT INTO servers (uuid, name, description, ip, port, "user", team_id, private_key_id, sentinel_updated_at, created_at, updated_at)
+SELECT '$server_uuid', 'rigel', 'Provisioned by provision-teams.sh for $e_team_name', 'host.docker.internal', 22, 'root', t.id, 0, NOW(), NOW(), NOW()
+FROM teams t
+WHERE t.name = '$e_team_name'
+  AND NOT EXISTS (SELECT 1 FROM servers s WHERE s.team_id = t.id AND s.name = 'rigel' AND s.deleted_at IS NULL);
 
 SQL
     done
@@ -218,6 +232,7 @@ psql_ro -c "SELECT id, LEFT(name, 40) AS name FROM teams ORDER BY id;"
 echo
 psql_ro -c "SELECT COUNT(*) AS user_rows FROM users;"
 psql_ro -c "SELECT COUNT(*) AS team_user_links FROM team_user;"
+psql_ro -c "SELECT s.id, s.name AS server, t.name AS team FROM servers s JOIN teams t ON t.id = s.team_id WHERE s.deleted_at IS NULL ORDER BY s.id;"
 echo
 echo "Done. Students with rows in 'users' can now sign in via GitHub OAuth"
 echo "using the email in their row. Coolify will link the account on first login."
