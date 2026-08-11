@@ -5,7 +5,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py .
+# Copy every top-level Python module — main.py imports from greetings.py,
+# and as students add more modules the glob picks them up automatically.
+COPY *.py ./
 
 EXPOSE 8000
 

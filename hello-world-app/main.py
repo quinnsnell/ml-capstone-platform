@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-APP_VERSION = "0.1.0"
+from greetings import APP_VERSION, GREETINGS, get_greeting
 
 app = FastAPI(title="hello-world-app", version=APP_VERSION)
 
@@ -12,8 +12,13 @@ class HealthResponse(BaseModel):
 
 
 @app.get("/")
-def hello():
-    return {"hello": "world"}
+def hello(lang: str = "en"):
+    return {"hello": get_greeting(lang)}
+
+
+@app.get("/languages")
+def languages():
+    return {"supported": sorted(GREETINGS.keys())}
 
 
 @app.get("/health", response_model=HealthResponse)
