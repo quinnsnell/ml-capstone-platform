@@ -21,9 +21,9 @@
 #   Group 1,alice@byu.edu,Alice Smith,alice-s
 #   Group 1,bob@byu.edu,Bob Jones,bjones
 #
-# For each unique team, also provisions a Server row named 'rigel' pointing
+# For each unique team, also provisions a Server row named 'ml-capstone' pointing
 # at host.docker.internal so team members can create Applications. Idempotent
-# on (team_id, name='rigel') — safe to re-run.
+# on (team_id, name='ml-capstone') — safe to re-run.
 #
 # Multiple rows per user = user belongs to multiple teams. That's how the
 # "individual phase → group phase" arc works: Phase-1 rows stay, Phase-2 rows
@@ -187,12 +187,12 @@ FROM teams t, users u
 WHERE t.name = '$e_team_name' AND u.email = '$e_email'
 ON CONFLICT (team_id, user_id) DO NOTHING;
 
--- Server 'rigel' for team $team_name (idempotent on team_id + name; ignores soft-deletes)
+-- Server 'ml-capstone' for team $team_name — abstracted from physical host so we can move it later (idempotent on team_id + name; ignores soft-deletes)
 INSERT INTO servers (uuid, name, description, ip, port, "user", team_id, private_key_id, sentinel_updated_at, created_at, updated_at)
-SELECT '$server_uuid', 'rigel', 'Provisioned by provision-teams.sh for $e_team_name', 'host.docker.internal', 22, 'root', t.id, 0, NOW(), NOW(), NOW()
+SELECT '$server_uuid', 'ml-capstone', 'Provisioned by provision-teams.sh for $e_team_name', 'host.docker.internal', 22, 'root', t.id, 0, NOW(), NOW(), NOW()
 FROM teams t
 WHERE t.name = '$e_team_name'
-  AND NOT EXISTS (SELECT 1 FROM servers s WHERE s.team_id = t.id AND s.name = 'rigel' AND s.deleted_at IS NULL);
+  AND NOT EXISTS (SELECT 1 FROM servers s WHERE s.team_id = t.id AND s.name = 'ml-capstone' AND s.deleted_at IS NULL);
 
 -- server_settings row for the server we just may have inserted. Coolify's dashboard
 -- reads server.settings.is_reachable and 500s if the settings row is missing.
@@ -202,7 +202,7 @@ SELECT s.id, true, true, false, NOW(), NOW()
 FROM servers s
 JOIN teams t ON t.id = s.team_id
 WHERE t.name = '$e_team_name'
-  AND s.name = 'rigel'
+  AND s.name = 'ml-capstone'
   AND s.deleted_at IS NULL
   AND NOT EXISTS (SELECT 1 FROM server_settings ss WHERE ss.server_id = s.id);
 
