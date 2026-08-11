@@ -12,7 +12,7 @@ Before you onboard anyone, verify:
 
 - The cluster is healthy — run `./scripts/smoke-test-cluster.sh` (14/14 expected)
 - `ml-capstone.cs.byu.edu` and `ml-capstone-admin.cs.byu.edu` resolve internally
-- CS IT has added a wildcard `*.ml-capstone.cs.byu.edu` → rigel (or you have `/etc/hosts` fallback documented for students — see below)
+- CS IT has added the wildcard `*.ml-capstone.cs.byu.edu` → rigel (delivered 2026-08-11 — all subdomains under `ml-capstone.cs.byu.edu` resolve internally to the cluster)
 - The `ml-capstone-coolify` GitHub App exists and is installed on the class GitHub org (if any)
 - Coolify's OAuth is enabled with GitHub (Settings → OAuth)
 
@@ -31,23 +31,11 @@ Options (pick one, be consistent across all groups):
 
 Either way: the repo starts empty. Students seed it (typically by forking `github.com/quinnsnell/sentiment-test-app` as a starting template, then customizing).
 
-### 2. Ask CS IT for the group's DNS records (or use fallback)
+### 2. DNS — nothing to do
 
-If the wildcard `*.ml-capstone.cs.byu.edu` is set up: **skip this step**. Everything resolves automatically.
+The wildcard `*.ml-capstone.cs.byu.edu` → rigel is live (2026-08-11). Both `Group1.ml-capstone.cs.byu.edu` and `Group1-staging.ml-capstone.cs.byu.edu` resolve automatically to rigel's internal IP for VPN clients. No per-group DNS work needed.
 
-If per-group records are needed:
-
-- `Group1.ml-capstone.cs.byu.edu` → rigel's IP
-- `Group1-staging.ml-capstone.cs.byu.edu` → rigel's IP
-
-Both internal-only DNS. If CS IT is slow, students add to their local `/etc/hosts`:
-
-```
-10.55.10.70   Group1.ml-capstone.cs.byu.edu
-10.55.10.70   Group1-staging.ml-capstone.cs.byu.edu
-```
-
-(Confirm the IP with `nslookup rigel.cs.byu.edu` from VPN.)
+Verify: `nslookup Group1.ml-capstone.cs.byu.edu` should return `10.55.10.70` (rigel).
 
 ### 3. Create the Coolify Team for the group
 

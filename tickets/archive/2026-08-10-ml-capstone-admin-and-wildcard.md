@@ -1,5 +1,9 @@
 # Ask CS sysadmins: internal DNS for `ml-capstone-admin.cs.byu.edu`
 
+> **Outcome (2026-08-11):** CS IT delivered the wildcard `*.ml-capstone.cs.byu.edu` → rigel. They did NOT add `ml-capstone-admin.cs.byu.edu` as an alias — a follow-up ticket ([`../active-ml-capstone-admin-alias.md`](../active-ml-capstone-admin-alias.md)) was sent for that specifically.
+
+---
+
 Hi,
 
 One quick internal-DNS ask to round out the ml-capstone classroom cluster.

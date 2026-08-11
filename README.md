@@ -68,8 +68,8 @@ qwen-coder-cluster/
 | Editor endpoint for the classroom LLM | `http://ml-capstone.cs.byu.edu:4000/v1` | VPN |
 | GitHub webhook (auto-deploy) | `https://ml-capstone.cs.byu.edu/webhooks/*` | Public internet (via CS IT HAProxy) |
 | Coolify API (deploy trigger from GitHub Actions) | `https://ml-capstone.cs.byu.edu/api/v1/deploy` | Public internet, token-gated |
-| Coolify admin UI | `https://ml-capstone-admin.cs.byu.edu` | VPN (planned — waiting on DNS) |
-| Student group apps | `https://<group>.ml-capstone.cs.byu.edu` | VPN |
+| Coolify admin UI | `https://ml-capstone-admin.cs.byu.edu` | VPN (planned — waiting on DNS alias) |
+| Student group apps | `http://<group>.ml-capstone.cs.byu.edu` | VPN (wildcard DNS live; HTTPS pending 2-level wildcard cert) |
 
 Model aliases exposed by LiteLLM:
 
@@ -84,12 +84,12 @@ Model aliases exposed by LiteLLM:
 - LiteLLM proxy on rigel:4000 (pools castor + pollux)
 - Coolify with GitHub App + tests-gate-deploy pipeline
 - Reference app at [`github.com/quinnsnell/sentiment-test-app`](https://github.com/quinnsnell/sentiment-test-app) — dual-model (LLM + local HF) demo
+- Wildcard DNS `*.ml-capstone.cs.byu.edu` → rigel (delivered 2026-08-11) — group URLs resolve automatically
 - Cluster smoke test hits 14/14
 
 **Planned:**
-- `ml-capstone-admin.cs.byu.edu` DNS + Coolify OAuth (see [`tickets/active-ml-capstone-admin-dns.md`](tickets/active-ml-capstone-admin-dns.md))
+- `ml-capstone-admin.cs.byu.edu` DNS + Coolify OAuth (follow-up ticket sent 2026-08-11; see [`tickets/active-ml-capstone-admin-dns.md`](tickets/active-ml-capstone-admin-dns.md))
 - Self-serve Coolify accounts per student group (via GitHub OAuth once admin DNS is up)
-- Per-group DNS wildcard `*.ml-capstone.cs.byu.edu`
 - Self-hosted GitHub Actions runner (for integration tests against staging URLs)
 
 ---

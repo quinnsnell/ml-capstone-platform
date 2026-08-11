@@ -25,16 +25,9 @@ Your instructor will provide:
 - **Two Coolify Deploy Webhook URLs** — one for staging, one for production. Your group uses these in your GitHub Actions workflow to trigger deploys.
 - **Two hostnames** — one for your group's staging environment (`<your-group>-staging.ml-capstone.cs.byu.edu`) and one for production (`<your-group>.ml-capstone.cs.byu.edu`). Examples throughout this guide use `Group1` as the placeholder — substitute your group's actual name.
 
-If `<your-group>.ml-capstone.cs.byu.edu` doesn't resolve when you're on VPN, your instructor may not yet have wildcard DNS set up. In that case add these two lines to your local `/etc/hosts` (macOS/Linux) or `C:\Windows\System32\drivers\etc\hosts` (Windows):
+All `*.ml-capstone.cs.byu.edu` subdomains resolve internally to the classroom cluster automatically — no `/etc/hosts` tweaking needed as long as you're on the CS VPN.
 
-```
-10.55.10.70   Group1.ml-capstone.cs.byu.edu
-10.55.10.70   Group1-staging.ml-capstone.cs.byu.edu
-```
-
-(Confirm the IP with `nslookup rigel.cs.byu.edu` while on VPN — it should return that address.)
-
-Everything below runs off `ml-capstone.cs.byu.edu`. Once you're on VPN, that hostname resolves to the classroom cluster on rigel.
+If DNS resolution doesn't work when you're on VPN, verify with `nslookup <your-group>.ml-capstone.cs.byu.edu` — it should return an internal `10.x.x.x` address. If it returns NXDOMAIN, your VPN's DNS resolver may be misconfigured; contact your instructor.
 
 ---
 
