@@ -1,0 +1,160 @@
+# Admin checklist — onboarding a student group
+
+This is the step-by-step procedure to onboard one student group at the start of a semester (or mid-semester if a new group forms). Follow top to bottom.
+
+Naming convention: student groups are `Group1`, `Group2`, ..., `Group9`. Adjust in your head if you're using different names.
+
+---
+
+## Prerequisites — do these once per semester, not per group
+
+Before you onboard anyone, verify:
+
+- The cluster is healthy — run `./scripts/smoke-test-cluster.sh` (14/14 expected)
+- `ml-capstone.cs.byu.edu` and `ml-capstone-admin.cs.byu.edu` resolve internally
+- CS IT has added a wildcard `*.ml-capstone.cs.byu.edu` → rigel (or you have `/etc/hosts` fallback documented for students — see below)
+- The `ml-capstone-coolify` GitHub App exists and is installed on the class GitHub org (if any)
+- Coolify's OAuth is enabled with GitHub (Settings → OAuth)
+
+If any of the above are missing, see [`admin-guide.md`](admin-guide.md) and [`coolify-runbook.md`](coolify-runbook.md) first.
+
+---
+
+## Per-group onboarding — do this once per group
+
+### 1. Create the group's GitHub repo
+
+Options (pick one, be consistent across all groups):
+
+- **Class GitHub org (recommended):** create `<class-org>/group1` empty repo. Install the `ml-capstone-coolify` GitHub App on it (or on the whole org — one-time).
+- **Student's personal account:** one student owns the group's repo. They install the `ml-capstone-coolify` GitHub App on their repo when they onboard.
+
+Either way: the repo starts empty. Students seed it (typically by forking `github.com/quinnsnell/sentiment-test-app` as a starting template, then customizing).
+
+### 2. Ask CS IT for the group's DNS records (or use fallback)
+
+If the wildcard `*.ml-capstone.cs.byu.edu` is set up: **skip this step**. Everything resolves automatically.
+
+If per-group records are needed:
+
+- `Group1.ml-capstone.cs.byu.edu` → rigel's IP
+- `Group1-staging.ml-capstone.cs.byu.edu` → rigel's IP
+
+Both internal-only DNS. If CS IT is slow, students add to their local `/etc/hosts`:
+
+```
+10.55.10.70   Group1.ml-capstone.cs.byu.edu
+10.55.10.70   Group1-staging.ml-capstone.cs.byu.edu
+```
+
+(Confirm the IP with `nslookup rigel.cs.byu.edu` from VPN.)
+
+### 3. Create the Coolify Team for the group
+
+Sign in to Coolify at `https://ml-capstone-admin.cs.byu.edu`.
+
+- Left sidebar → **Teams** → **+ New Team**
+- Name: `Group1`
+- Description: `<class name>, term, group members`
+- Set resource quotas: **Memory 4 GB, CPU 2 cores, Disk 20 GB** (adjust for the class)
+
+### 4. Invite the group's students
+
+Team → **Members** → **Invite**. Enter each student's GitHub email address.
+
+Students will receive an email invite. They click, sign in with GitHub, land in the Coolify Team.
+
+Alternative: give the group a signup link, they self-serve.
+
+### 5. Provision two Coolify Applications for the group (staging + prod)
+
+Inside the group's Team, create:
+
+**Application 1 — staging**
+- Name: `group1-staging`
+- Source: `ml-capstone-coolify` GitHub App
+- Repository: `<class-org>/group1` (or `<student-owner>/group1`)
+- Branch: `staging`
+- Build pack: Dockerfile
+- Ports mapping: `<host-port>:<container-port>` — pick a unique host port (e.g., `8110` for Group1 staging, `8111` for Group1 prod)
+- Environment Variables:
+  - `LITELLM_URL=http://ml-capstone.cs.byu.edu:4000/v1`
+  - `LITELLM_API_KEY=sk-noauth`
+  - `MODEL=classroom-chat`
+  - `CUDA_VISIBLE_DEVICES=<N>` where `N = (group_number - 1) % 4` (spreads groups across GPUs)
+- Domain: `Group1-staging.ml-capstone.cs.byu.edu`
+- Auto Deploy: **OFF** (deploys come from GitHub Actions)
+- Enable GPU (Configuration → Advanced → GPU section)
+
+**Application 2 — production** — same as staging, but:
+- Name: `group1`
+- Branch: `main`
+- Domain: `Group1.ml-capstone.cs.byu.edu`
+- Different host port if you're using explicit port mappings
+
+### 6. Copy each Application's Deploy Webhook URL
+
+For each of the two Applications, go to **Webhooks** tab and copy the **Deploy Webhook URL**. It looks like:
+
+```
+https://ml-capstone-admin.cs.byu.edu/api/v1/deploy?uuid=<app-uuid>&force=false
+```
+
+You'll send both URLs to the group.
+
+### 7. Generate a Coolify API token for the group
+
+Coolify → **Keys & Tokens** → **API Tokens** → **+ New**
+- Name: `group1-github-actions`
+- Scope: minimum needed to trigger deploys (or full access — tighten later)
+- Copy the token
+
+You'll send this to the group along with the webhook URLs.
+
+### 8. Hand off to the group
+
+Send the group's members:
+
+- **GitHub repo URL** (from step 1)
+- **Their app URLs:**
+  - Staging: `http://Group1-staging.ml-capstone.cs.byu.edu`
+  - Production: `http://Group1.ml-capstone.cs.byu.edu`
+- **GitHub Actions secrets** they need to set on their repo (Settings → Secrets and variables → Actions):
+  - `COOLIFY_DEPLOY_WEBHOOK_STAGING` = (staging webhook URL from step 6)
+  - `COOLIFY_DEPLOY_WEBHOOK_PROD` = (prod webhook URL from step 6)
+  - `COOLIFY_API_TOKEN` = (token from step 7)
+- Point them at [`student-guide.md`](student-guide.md) for the rest.
+
+---
+
+## Off-boarding a group (end of semester or drop)
+
+1. **Coolify:** delete the two Applications. Delete the Team (removes members).
+2. **DNS:** if per-group records were added, ask CS IT to remove them. If wildcard, no action.
+3. **GitHub App:** if the App was installed only on this group's repo, uninstall from that repo. If org-wide, no per-group action.
+4. **Rotate:** the group's `COOLIFY_API_TOKEN` will be orphaned when the App is deleted; no rotation needed. If the group's repo continues to exist and might use the token elsewhere, revoke it in Coolify.
+
+---
+
+## Mid-semester "reset a group" (they broke their setup badly)
+
+If a group's Applications get into a weird state:
+
+1. Delete both their Applications (staging + prod)
+2. Recreate per step 5 above (same names, same env vars, same domain)
+3. Re-copy their Deploy Webhook URLs (they'll be different) and API token
+4. Have them update their GitHub repo secrets
+
+Their code and git history are untouched — only Coolify state is reset.
+
+---
+
+## Bulk onboarding
+
+For onboarding many groups at once, the manual clicks in Coolify are the bottleneck. Consider scripting via Coolify's API:
+
+- `POST /api/v1/teams` — create team
+- `POST /api/v1/applications/private-github-app` — create Application
+- `GET /api/v1/applications/{uuid}/webhooks` — retrieve deploy webhook URL
+
+A provisioning script is planned but not yet written; when it exists, it'll live at `scripts/provision-group.sh`.

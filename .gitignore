@@ -1,0 +1,73 @@
+# =============================================================================
+# NEVER COMMIT
+# =============================================================================
+
+# Certificates & keys
+_secrets/
+star_cs_byu_edu*.zip
+star_cs_byu_edu*/
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+*-private-key*
+*private-key*
+MJ-test-key
+
+# Environment files with real values
+.env
+.env.local
+.env.production
+coolify-env
+
+# GitHub App private keys (extra explicit — any .pem ending)
+ml-capstone-coolify*.pem
+*-github-app*.pem
+
+# Coolify state
+coolify-*.tgz
+
+# =============================================================================
+# Build / cache junk
+# =============================================================================
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+node_modules/
+build/
+dist/
+
+# =============================================================================
+# Editor / OS
+# =============================================================================
+.DS_Store
+*.swp
+*.swo
+.vscode/
+.idea/
+*~
+
+# =============================================================================
+# Nested repos (tracked separately on GitHub, not by this repo)
+# =============================================================================
+# sentiment-test-app is at github.com/quinnsnell/sentiment-test-app — students
+# clone that repo directly. Local checkout here is for convenience while
+# working on the platform.
+sentiment-test-app/
+
+# =============================================================================
+# Local test artifacts
+# =============================================================================
+.claude/
+
+# =============================================================================
+# Ad-hoc scripts kept local
+# =============================================================================
+sendsimplemessage.py
