@@ -53,10 +53,12 @@ ml-capstone-platform/
 │   ├── uninstall-qwen-cluster.sh  Reverse of the above
 │   ├── verify-qwen-host.sh        Health check on a GPU host post-install
 │   └── smoke-test-cluster.sh      End-to-end smoke test (run from your laptop over VPN)
+├── hello-world-app/       Minimal FastAPI starter — fork this for the Coolify onboarding lab
+├── sentiment-test-app/    Reference app: LLM + local HF, base+app Docker split, integration tests
 ├── tickets/
 │   ├── active-*.md        Open coordination tickets with CS IT
 │   └── archive/           Historical / resolved tickets
-└── (see also: github.com/quinnsnell/sentiment-test-app — reference app; clone separately)
+└── roster-*.csv           Class rosters — provision-teams.sh reads these
 ```
 
 ---
@@ -68,8 +70,8 @@ ml-capstone-platform/
 | Editor endpoint for the classroom LLM | `http://ml-capstone.cs.byu.edu:4000/v1` | VPN |
 | GitHub webhook (auto-deploy) | `https://ml-capstone.cs.byu.edu/webhooks/*` | Public internet (via CS IT HAProxy) |
 | Coolify API (deploy trigger from GitHub Actions) | `https://ml-capstone.cs.byu.edu/api/v1/deploy` | Public internet, token-gated |
-| Coolify admin UI | `https://ml-capstone-admin.cs.byu.edu` | VPN (planned — waiting on DNS alias) |
-| Student group apps | `http://<group>.ml-capstone.cs.byu.edu` | VPN (wildcard DNS live; HTTPS pending 2-level wildcard cert) |
+| Coolify admin UI | `https://ml-capstone-admin.cs.byu.edu` | VPN |
+| Student group apps | `https://<group>.ml-capstone.cs.byu.edu` | VPN |
 
 Model aliases exposed by LiteLLM:
 
@@ -83,14 +85,15 @@ Model aliases exposed by LiteLLM:
 **Working end-to-end today:**
 - LiteLLM proxy on rigel:4000 (pools castor + pollux)
 - Coolify with GitHub App + tests-gate-deploy pipeline
-- Reference app at [`github.com/quinnsnell/sentiment-test-app`](https://github.com/quinnsnell/sentiment-test-app) — dual-model (LLM + local HF) demo
 - Wildcard DNS `*.ml-capstone.cs.byu.edu` → rigel (delivered 2026-08-11) — group URLs resolve automatically
+- Coolify admin UI at `https://ml-capstone-admin.cs.byu.edu` with GitHub OAuth (invite-gated via `Registration Allowed=off`)
+- Self-serve Coolify Teams per student/group via `scripts/provision-teams.sh` (reads a roster CSV, seeds users + teams + servers)
+- `hello-world-app/` starter + `sentiment-test-app/` reference — both fork-and-deploy ready
 - Cluster smoke test hits 14/14
 
 **Planned:**
-- `ml-capstone-admin.cs.byu.edu` DNS + Coolify OAuth (follow-up ticket sent 2026-08-11; see [`tickets/active-ml-capstone-admin-alias.md`](tickets/active-ml-capstone-admin-alias.md))
-- Self-serve Coolify accounts per student group (via GitHub OAuth once admin DNS is up)
-- Self-hosted GitHub Actions runner (for integration tests against staging URLs)
+- Self-hosted GitHub Actions runner for integration tests against staging URLs (Phase 18)
+- Team cleanup / reset script (Phase 21)
 
 ---
 
