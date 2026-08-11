@@ -286,7 +286,7 @@ Open PR from `staging` into `main` → merge into `main`
 - Add a GitHub Actions workflow with the three jobs above
 - Follow the branch flow: feature branch → PR to `staging` → PR to `main`
 
-> **Roadmap note.** Automated integration tests running from GitHub Actions against the live staging URL (Vercel-style Preview Deploys with full pytest) require a self-hosted runner inside the CS VPN. That's on the roadmap for once the class grows. For now, Coolify's health check + manual QA of the staging URL fills the gap.
+> **Roadmap note.** Automated integration tests running from GitHub Actions against the live staging URL (Vercel-style Preview Deploys with full pytest) require a self-hosted runner inside the CS VPN. That's on the roadmap for once the class grows. For now, Coolify's health check runs as the deploy gate (Section 6, Tier 2), and you run `./integration-test.sh --staging` by hand before promoting to prod (Section 6, Tier 3).
 
 ## Why staging + prod?
 
@@ -679,13 +679,119 @@ git push -u origin main
 git push origin staging                         # push staging too
 ```
 
-First run on `main` triggers `test` + `deploy-prod`. On subsequent development you'll typically push to `staging` first (see Section 7). Watch:
+First run on `main` triggers `test` + `deploy-prod`. On subsequent development you'll typically push to `staging` first (see Section 8). Watch:
 
 1. **GitHub Actions tab** → CI/CD workflow runs. Job graph shows `test` → `deploy-prod`.
 2. **Coolify UI** (instructor can share) → sentiment-app prod deploys.
 3. `curl http://Group1.ml-capstone.cs.byu.edu/health` returns your `/health` JSON. (VPN required.)
 
-## Section 6: Making your deploys fast (when they get slow)
+## Section 6: Your testing strategy — the three tiers
+
+You now have a working pipeline. That raises a real question: *"how do I actually know my app works?"* The classroom setup has three distinct testing layers, each catching different classes of bugs at different times. Understanding the mental model matters more than any single tool.
+
+### The three tiers at a glance
+
+| Tier | Tool | When | Scope | Reachable from |
+|---|---|---|---|---|
+| **Pre-push** | `./test-local.sh` | Before every `git push` | One app | Your laptop |
+| **Deploy gate** | Coolify's `/health` check | After each deploy, gates the swap | One app, against real prod dependencies | Coolify itself, on rigel |
+| **Integration** | `./integration-test.sh` | After staging deploys, before merging to prod | One app, against live deployed URL, with real data + edge cases | Your laptop |
+
+There's also a cluster-wide `smoke-test-cluster.sh` your instructor runs to check whole-cluster health — you don't need it day-to-day.
+
+### Tier 1 — Pre-push local (`test-local.sh`)
+
+Runs on your laptop. Builds the container from your current code, starts it, runs the `pytest` suite inside the container, hits every endpoint. Catches syntax errors, broken imports, obvious logic bugs, and "did I forget to update the Dockerfile" mistakes before you push code that would fail in CI.
+
+Fast feedback loop: green here means you're safe to push. Roughly 30 seconds after the initial image is built.
+
+**Limits:** doesn't test against real infrastructure — the `/health` and `/analyze` endpoints hit the classroom LiteLLM, but everything is running locally on your Mac. Bugs that only appear in the Coolify environment (env vars, GPU allocation, networking) can slip through.
+
+### Tier 2 — Deploy gate (Coolify's `/health` check)
+
+Not something you run — it runs automatically as part of every deploy. After Coolify builds and starts your container, it polls your `/health` endpoint. If `/health` returns 503, Coolify marks the deploy unhealthy and keeps serving from the old container. If it returns 200, the new container takes over.
+
+The trick you learned in Section 4: make `/health` do a real deep check. It calls the LLM, runs a sample through the local model, verifies both succeed. That's an actual integration test running inside the deploy pipeline — the deploy literally cannot succeed if the app can't reach its real dependencies.
+
+**Limits:** it's a single scripted check. It doesn't try 50 different inputs, look at response shapes across a variety of cases, or verify edge cases. It answers "does this container basically work?" — not "does this container behave correctly on the range of inputs my users will send?"
+
+### Tier 3 — Integration testing (`integration-test.sh`)
+
+This is what fills the gap between Tier 2 (basic smoke) and full production coverage. It runs on your laptop after a staging deploy and hits the live staging URL with real data:
+
+- Happy paths — positive, negative, neutral text; both models agree; sensible confidence scores
+- Edge cases — empty text (should 422), unicode + emoji, very long text (~1500 chars), quotes and HTML in input, punctuation-only input
+- Response-shape contract testing — every response has all required fields, confidence values are in [0, 1], sentiment values are in the allowed enum
+- Optional stress — concurrent requests, throughput measurement
+
+`integration-test.sh` is bundled with `sentiment-test-app` — check that repo for the actual script. Copy it into your own group's repo, edit the URL default and the test cases to match your app, and use it as your promotion gate.
+
+Green here means: your staging deploy handles the diverse real inputs your users will send, not just the happy path. **Safe to promote from staging to main.**
+
+Sample output:
+
+```
+integration-test.sh   target=http://Group1-staging.ml-capstone.cs.byu.edu
+────────────────────────────────────────────────────────────────────────────
+
+Basic contract
+  PASS  /ready returns 200 with ready=true                       41ms
+  PASS  /gpu returns valid structure                             38ms
+  PASS  /health returns 200 with llm.ok and local.ok            348ms
+
+Sentiment correctness
+  PASS  positive: enthusiastic short (both → positive)         409ms
+  PASS  negative: complaint short (both → negative)            439ms
+  ...
+
+Robustness
+  PASS  /analyze without text returns 422                        32ms
+  PASS  /analyze handles unicode + emoji (both → positive)     435ms
+  ...
+
+────────────────────────────────────────────────────────────────────────────
+13 checks  13 passed  0 failed
+
+Green across the board — safe to promote to main.
+```
+
+### What makes a good integration test?
+
+A few principles you'll see in real production integration test suites:
+
+**Test the contract, not the implementation.** Your integration tests should say "given input X, response has field Y with type Z." They shouldn't care how `main.py` is structured. If a colleague refactors `classify_llm` into a different module, your integration tests should keep passing — they're black-box testing the deployed URL.
+
+**Cover the boring stuff too.** It's tempting to just test positive/negative/neutral and call it done. But real users send empty strings, single characters, emoji, non-English text, extremely long text, and text with quotes and HTML. Each of those has bitten someone in production. Include a few of each.
+
+**Assert on data shapes, not just data.** For an LLM app especially, exact output can vary between requests (temperature, model updates). Assert that `confidence` is in [0, 1] and is a float — not that it's exactly 0.98. Assert that `sentiment` is one of the allowed values — not that any specific input produces "positive".
+
+**Time your tests.** Stress tests are just integration tests plus a stopwatch. Knowing "under load, /analyze goes from 400ms to 4000ms" is production-critical information. A `--stress` flag on your integration script is a mini load test.
+
+**Don't test what upstream tests.** Your tests shouldn't verify that FastAPI returns 422 for a malformed body — that's FastAPI's test suite's job. Test *your* logic — that your endpoints call the right helpers, return the expected shapes, handle the edge cases you designed for.
+
+### Why we don't do this in CI (yet)
+
+In a real production shop with an internal network + budget for extra infrastructure, the integration test would run automatically as a `deploy-staging` → `integration-tests` → `deploy-prod` chain in GitHub Actions. Merging to `main` would be blocked until integration tests pass.
+
+Our setup can't do that yet because GitHub-hosted Actions runners are on the public internet and can't reach VPN-only staging URLs. That would need a self-hosted GitHub Actions runner running inside the CS VPN — which is planned but not yet built.
+
+Until then, running `integration-test.sh` before opening the PR from staging → main is the manual equivalent. When the class scales up and a self-hosted runner exists, the exact same script will just move from "you run it manually" to "Actions runs it automatically". Same tests, same shape, more automation.
+
+### Where each tier catches what
+
+| Bug type | Tier 1 (`test-local`) | Tier 2 (`/health`) | Tier 3 (`integration-test`) |
+|---|---|---|---|
+| Syntax error, import bug | ✅ | (would never deploy) | (would never deploy) |
+| Broken endpoint URL | ✅ | ✅ | ✅ |
+| App can't reach LLM in staging | ❌ (local works) | ✅ | ✅ |
+| GPU allocation missing | ❌ (fallback to CPU on Mac) | ✅ | ✅ |
+| Response shape wrong under specific input | ❌ (happy path only) | ❌ (single scripted check) | ✅ |
+| Model gives poor accuracy on real user data | ❌ | ❌ | ✅ |
+| Regression from a code change altering behavior | ❌ | ❌ | ✅ |
+
+Each tier is a legit safety net at a different depth. Skipping any of them means bugs that could've been caught earlier get caught later — often by users.
+
+## Section 7: Making your deploys fast (when they get slow)
 
 When you first ship the app from Section 1, your deploy cycle will feel great — small image, small dependencies, ~30 seconds from push to running container. But the moment you add a real ML dependency (`torch`, `transformers`, a HuggingFace model, `spacy` with a language pack, etc.), each deploy suddenly takes **5-6 minutes**. That's slow enough to break your development flow.
 
@@ -848,7 +954,7 @@ The classroom's reference app — `github.com/quinnsnell/sentiment-test-app` —
 
 Read that once, especially if your project imports torch or transformers. It'll save you real time.
 
-## Section 7: The day-to-day update–test–PR–deploy workflow
+## Section 8: The day-to-day update–test–PR–deploy workflow
 
 The full workflow, from a feature idea to code in production:
 
@@ -883,12 +989,25 @@ On GitHub: **Compare & pull request** → set base to `staging`. When the PR ope
 Merging your PR into `staging` pushes to `staging`, triggering:
 
 - `test` (again, on merge commit)
-- `deploy-staging` (Coolify deploys to your staging URL)
-- `integration-tests` (self-hosted runner hits live staging URL with pytest)
+- `deploy-staging` (Coolify deploys to your staging URL, gated by the deep `/health` check — see Section 6, Tier 2)
 
-If integration tests pass, you know the deploy actually works against real infrastructure.
+Coolify's health check is the Tier 2 gate — a bad container never becomes the live staging container. But that's just a scripted check; it doesn't cover the full range of inputs your users will send.
 
-### Step 5 — Open a "promotion" PR from `staging` into `main`
+### Step 5 — Run integration tests against staging (Section 6, Tier 3)
+
+Before promoting to prod, run the integration tests against the live staging URL:
+
+```bash
+./integration-test.sh --staging
+```
+
+That's ~15 checks covering happy paths (positive/negative/neutral samples), edge cases (empty input, unicode, long text, special chars), and response-shape contracts. Optional `--stress` adds concurrency/throughput checks.
+
+If any fail — investigate, fix, push to `staging` again. Do NOT open the promotion PR until the integration tests are green.
+
+If all pass, you know staging holds up against the diverse real inputs users will send. **Safe to promote.**
+
+### Step 6 — Open a "promotion" PR from `staging` into `main`
 
 ```bash
 git checkout main
@@ -904,7 +1023,7 @@ Or (recommended, so someone reviews before prod deploy):
 - Reviewer sanity-checks the diff and the live staging URL
 - **Merge** → pushes to `main` → `deploy-prod` fires → prod URL updates
 
-### Rollback
+### Step 7 — Rollback
 
 If prod breaks after a merge:
 
