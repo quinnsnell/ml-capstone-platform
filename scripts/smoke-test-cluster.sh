@@ -17,23 +17,27 @@
 # Usage:
 #   ./smoke-test-cluster.sh                   # sentiment app on the classroom Coolify (needs DNS)
 #   ./smoke-test-cluster.sh --local           # sentiment app on localhost:8000
-#   ./smoke-test-cluster.sh -p 8100           # sentiment app at http://rigel.cs.byu.edu:8100
+#   ./smoke-test-cluster.sh -p 8100           # sentiment app at http://ml-capstone.cs.byu.edu:8100
 #   ./smoke-test-cluster.sh -s <URL>          # sentiment app at custom URL
 #   ./smoke-test-cluster.sh --no-sentiment    # skip sentiment section entirely
 #
 # The -p / --rigel-port shortcut is for the "direct port" Coolify deploy path
-# (no DNS wiring needed): publish the container's port to a host port on rigel,
-# then hit it directly.
+# (no DNS wiring needed): publish the container's port to a host port on the
+# ml-capstone box, then hit it directly.
 #
 # Any config var can also be overridden via env, e.g.
-#   PROXY_HOST=ml-capstone.cs.byu.edu ./smoke-test-cluster.sh
+#   PROXY_HOST=rigel.cs.byu.edu ./smoke-test-cluster.sh     # if the ml-capstone DNS is broken and you need to hit the physical host directly
 #   SENTIMENT_URL=https://sentiment.ml-capstone.cs.byu.edu ./smoke-test-cluster.sh
 # =============================================================================
 
 set -u
 
 # ---- Configuration ------------------------------------------------------
-: "${PROXY_HOST:=rigel.cs.byu.edu}"
+# Default to the abstraction (ml-capstone.cs.byu.edu) rather than the physical
+# hostname (rigel.cs.byu.edu). Override via env to hit the physical box directly
+# if DNS is broken; both hostnames resolve to the same IP so :4000/:8100 work
+# either way (only :443 flows through HAProxy).
+: "${PROXY_HOST:=ml-capstone.cs.byu.edu}"
 : "${PROXY_PORT:=4000}"
 : "${COOLIFY_PORT:=8000}"
 : "${GPU_HOST_A:=castor.cs.byu.edu}"
