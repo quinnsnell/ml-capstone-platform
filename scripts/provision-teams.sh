@@ -194,6 +194,18 @@ FROM teams t
 WHERE t.name = '$e_team_name'
   AND NOT EXISTS (SELECT 1 FROM servers s WHERE s.team_id = t.id AND s.name = 'rigel' AND s.deleted_at IS NULL);
 
+-- server_settings row for the server we just may have inserted. Coolify's dashboard
+-- reads server.settings.is_reachable and 500s if the settings row is missing.
+-- Sentinel disabled to avoid needing an encrypted token per server.
+INSERT INTO server_settings (server_id, is_reachable, is_usable, is_sentinel_enabled, created_at, updated_at)
+SELECT s.id, true, true, false, NOW(), NOW()
+FROM servers s
+JOIN teams t ON t.id = s.team_id
+WHERE t.name = '$e_team_name'
+  AND s.name = 'rigel'
+  AND s.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM server_settings ss WHERE ss.server_id = s.id);
+
 SQL
     done
 
