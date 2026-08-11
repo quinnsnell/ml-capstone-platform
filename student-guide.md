@@ -342,7 +342,11 @@ Team
 
 ### 4. Install the GitHub App on your repo
 
-Before creating Applications, Coolify needs read+webhook access to your repo:
+> **Prereq:** you need a GitHub repository at this point — even an empty one is fine (Coolify won't try to deploy until you tell it to). If your team doesn't have one yet, either:
+> - Create an empty repo now and add code later during Section 1, OR
+> - **Fork the `hello-world-app/` starter** from `github.com/quinnsnell/ml-capstone-platform` — it's a minimal FastAPI (`/`, `/health`, `/languages`) with the same 3-job workflow used by the reference app. Good for proving the pipeline works before you start building your real app.
+
+Before creating Applications, Coolify needs read + webhook access to your repo:
 
 - Sidebar → **Sources**. You should see **`ml-capstone-coolify`** already listed (the instructor set this up).
 - Click into it → **Manage** or the GitHub-icon link → this takes you to GitHub's App-installation page.
@@ -428,6 +432,8 @@ If both URLs respond, your Coolify setup is done. Everything after this is code.
 ## Section 1: Build your first deployable app
 
 Let's build a small text-analysis service that uses the classroom LLM. Same pattern as the reference `sentiment-test-app` — you'll build it from scratch to see every piece.
+
+> **If you used `hello-world-app/` to prove the Coolify pipeline** in the Setup section: you can either replace its contents with the sentiment app below (same repo, same Applications, no reconfig needed), or keep it as a "known-good" sandbox in a separate repo and start a new repo for the sentiment app. Both work.
 
 ### 1a. Create the repo
 
