@@ -365,10 +365,10 @@ You'll be redirected back to a GitHub confirmation page. That's expected — Coo
 
 Inside your project → click into the **production** Environment → **+ Add Resource**.
 
-You'll see several options. Click **Private Repository (with GitHub App)** — **NOT** the plain "Private Repository" tile above it. Those look identical at a glance but are completely different:
+You'll see several options. Click **Private Repository (with GitHub App)** — **NOT** the similarly-named "Private Repository (with Deploy Key)" tile. Those look almost identical but are completely different auth flows:
 
 - **Private Repository (with GitHub App)** ← this one — uses the ml-capstone-coolify App you just installed. Correct choice.
-- **Private Repository** ← *not* this — uses SSH deploy keys instead, an entirely different auth flow that won't pair with the App and will silently fail deploys.
+- **Private Repository (with Deploy Key)** ← *not* this — uses an SSH deploy key Coolify generates and expects you to paste into your repo. Different auth path; won't pair with the App and will silently fail deploys.
 
 Then fill in:
 
