@@ -52,7 +52,9 @@ ml-capstone-platform/
 │   ├── install-qwen-cluster.sh    Idempotent installer for GPU hosts (castor, pollux)
 │   ├── uninstall-qwen-cluster.sh  Reverse of the above
 │   ├── verify-qwen-host.sh        Health check on a GPU host post-install
-│   └── smoke-test-cluster.sh      End-to-end smoke test (run from your laptop over VPN)
+│   ├── smoke-test-cluster.sh      End-to-end smoke test (run from your laptop over VPN)
+│   ├── provision-teams.sh         Bulk-create Coolify teams+users+servers from roster CSV (runs on rigel)
+│   └── invite-to-org.sh           Invite roster users to the byu-ml-capstone GitHub org (runs on laptop)
 ├── sentiment-test-app/    Reference app: LLM + local HF, base+app Docker split, integration tests
 ├── tickets/
 │   ├── active-*.md        Open coordination tickets with CS IT

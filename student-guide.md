@@ -346,9 +346,16 @@ Team
 - From the project overview → **+ New Environment** → name it `staging`.
 - You should now see both `production` and `staging` listed on the project page.
 
-### 4. Create your class repo under the `byu-ml-capstone` GitHub org
+### 4. Accept the org invite + create your class repo under `byu-ml-capstone`
 
-Your instructor invited you to the **[byu-ml-capstone](https://github.com/byu-ml-capstone)** GitHub organization. Check your GitHub notifications and accept the invite if you haven't already — you can also visit https://github.com/orgs/byu-ml-capstone/invitation to see pending invitations.
+Your instructor sent you an invitation to the **[byu-ml-capstone](https://github.com/byu-ml-capstone)** GitHub organization. **You must accept the invitation before you can create your repo inside the org.**
+
+- Check your GitHub notifications (bell icon top right) → look for "You have an invitation to join byu-ml-capstone"
+- Or visit https://github.com/orgs/byu-ml-capstone/invitation directly
+- Or check your inbox — GitHub also emails the invitation to your primary GitHub email
+- Click **Join byu-ml-capstone**
+
+If you can't find the invitation and you're sure the instructor sent it, ask them to re-run `./scripts/invite-to-org.sh --apply` (idempotent — re-sends only for pending users).
 
 You'll create your class repo **inside the org**, not under your personal account. Why: the instructor installed the `byu-ml-capstone-coolify` GitHub App at the org level once, and that installation automatically covers every repo you create inside the org. You never have to install anything on GitHub — Coolify sees your repo as soon as it exists.
 

@@ -154,3 +154,22 @@ CSV columns: `team_name,email,name,github_username`. One row per (team, user) pa
 After provisioning: students sign in via GitHub OAuth (email on their GitHub account must match their roster row) and self-create their Projects, Environments, and Applications per [`student-guide.md`](student-guide.md) → Part B → Setup section.
 
 Applications are still created by students (Coolify's API supports app creation but classroom pedagogy is better if students walk the UI themselves the first time).
+
+## Invite students to the class GitHub org
+
+**Runs from your laptop, not rigel** (needs `gh` CLI authenticated as an Owner of `byu-ml-capstone`). Reads the same roster CSV:
+
+```bash
+./scripts/invite-to-org.sh                          # dry-run against newest roster-*.csv
+./scripts/invite-to-org.sh --roster path.csv --apply
+./scripts/invite-to-org.sh --org other-name         # different org name
+```
+
+Idempotent — users who are already members or have a pending invite are skipped. Every roster row needs a valid `github_username` for this to work.
+
+**Order of operations at term start:**
+1. `./scripts/invite-to-org.sh --apply` (send org invitations from laptop)
+2. `sudo ./scripts/provision-teams.sh --apply` (create Coolify teams+servers on rigel)
+3. Students accept the org invite + sign in to Coolify → land in their pre-provisioned team → create their repo from the `hello-world-app` template inside the org.
+
+Steps 1 and 2 can happen in any order — they don't depend on each other. But students can't complete their setup until BOTH have run.
