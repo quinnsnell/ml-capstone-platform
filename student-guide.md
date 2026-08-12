@@ -353,9 +353,13 @@ Team
 
 Before creating Applications, Coolify needs read + webhook access to your repo:
 
-- Sidebar → **Sources**. You should see **`ml-capstone-coolify`** already listed (the instructor set this up).
-- Click into it → **Manage** or the GitHub-icon link → this takes you to GitHub's App-installation page.
-- Install `ml-capstone-coolify` on your team's repo. Repository access → **Only select repositories** → pick just your class repo.
+- Sidebar → **Sources**. You should see **`ml-capstone-coolify`** already listed (the instructor set this up). This is Coolify's *side* of the integration — no button here to install on your repo.
+- To install the App on your repo, go directly to **https://github.com/apps/ml-capstone-coolify** in a browser signed into your GitHub account.
+- Click **Install** (or **Configure**, if it's already installed on your account for a different repo).
+- Choose your GitHub account.
+- **Only select repositories** → tick just `ml-capstone-hello-world-app` (or whatever your class repo is called) → **Install**.
+
+You'll be redirected back to a GitHub confirmation page. That's expected — Coolify doesn't need any redirect back to itself for the installation to work; the App will fire webhooks to Coolify automatically going forward.
 
 ### 5. Create your production Application
 
