@@ -7,6 +7,31 @@ Your class has access to a shared **AI + CI/CD cluster** at `ml-capstone.cs.byu.
 
 You can use either capability or both. This guide walks you through setting up each.
 
+## Contents
+
+- [Before you start](#before-you-start)
+- **Part A — AI coding in your editor**
+  - [Option 1: VS Code + Continue (recommended)](#option-1-vs-code--continue-recommended)
+  - [Option 2: Continue chat + GitHub Copilot autocomplete](#option-2-continue-chat--github-copilot-autocomplete)
+  - [Option 3: Terminal + opencode](#option-3-terminal--opencode)
+  - [Option 4: VS Code + GitHub Copilot BYOK](#option-4-vs-code--github-copilot-byok)
+- **Part B — Deploying your app via CI/CD**
+  - [The overall flow](#the-overall-flow) — architecture diagram + who does what
+  - [Why staging + prod?](#why-staging--prod)
+  - [Setup: Sign in and create your Coolify Applications](#setup-sign-in-and-create-your-coolify-applications) — the 11-step onboarding lab
+  - [Section 1: Build your first deployable app](#section-1-build-your-first-deployable-app) — grow hello-world into a sentiment classifier
+  - [Section 2: Test it locally](#section-2-test-it-locally)
+  - [Section 3: Add tests](#section-3-add-tests)
+  - [Section 4: Make `/health` do the integration test's job](#section-4-make-health-do-the-integration-tests-job)
+  - [Section 5: GitHub Actions — the 3-job pipeline](#section-5-github-actions--the-3-job-pipeline)
+  - [Section 6: Your testing strategy — the three tiers](#section-6-your-testing-strategy--the-three-tiers)
+  - [Section 7: Making your deploys fast (when they get slow)](#section-7-making-your-deploys-fast-when-they-get-slow) — the two-Dockerfile pattern
+  - [Section 8: The day-to-day update–test–PR–deploy workflow](#section-8-the-day-to-day-updatetestprdeploy-workflow)
+- [Using the classroom LLM from inside your deployed app](#using-the-classroom-llm-from-inside-your-deployed-app)
+- [Using a GPU in your app](#using-a-gpu-in-your-app)
+- [Troubleshooting](#troubleshooting)
+- [Quick reference](#quick-reference)
+
 ## Before you start
 
 **Install GlobalProtect and connect to the CS VPN** — the cluster is on the CS network. Only one URL (the GitHub webhook path) is reachable from the public internet; everything else, including the LLM endpoint and your deployed apps, requires VPN.

@@ -11,6 +11,27 @@ Students learn the industry-standard flow: push to a GitHub repo → tests run i
 
 Only one path on `rigel` is reachable from the public internet: the GitHub webhook endpoint (`ml-capstone.cs.byu.edu/webhooks/*`) and the Coolify deploy API (`/api/v1/deploy`), both via CS IT's HAProxy doing SNI passthrough. Everything else — LLM endpoint, deployed apps, admin UI — requires the BYU CS VPN.
 
+## Contents
+
+1. [Architecture](#1-architecture)
+2. [Prerequisites](#2-prerequisites)
+3. [Base Host Preparation](#3-base-host-preparation)
+4. [Install NVIDIA Container Toolkit](#4-install-nvidia-container-toolkit)
+5. [Install Coolify](#5-install-coolify)
+6. [Install LiteLLM Alongside](#6-install-litellm-alongside)
+7. [Public entry via CS IT HAProxy](#7-public-entry-via-cs-it-haproxy)
+8. [TLS termination — CS-provided wildcard cert](#8-tls-termination--cs-provided-cs-byu-edu-wildcard-cert)
+9. [Create the GitHub App](#9-create-the-github-app)
+10. [Wire the GitHub App into Coolify](#10-wire-the-github-app-into-coolify)
+11. [Team & User Model — self-serve teams via GitHub OAuth](#11-team--user-model--self-serve-teams-via-github-oauth)
+12. [Per-Resource Limits](#12-per-resource-limits--set-these-before-any-deploys)
+13. [GPU Allocation Policy](#13-gpu-allocation-policy)
+14. [Student-Facing Flow](#14-student-facing-flow)
+15. [Backups](#15-backups)
+16. [Upgrade & Teardown](#16-upgrade--teardown)
+17. [Failure Modes](#17-failure-modes)
+18. [Why This Design](#18-why-this-design)
+
 ---
 
 ## 1. Architecture
