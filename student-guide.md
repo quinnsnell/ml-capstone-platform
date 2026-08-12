@@ -472,16 +472,7 @@ Each Coolify Application has a Deploy Webhook URL that triggers *just the contai
 **Still in Coolify** (`https://ml-capstone-admin.cs.byu.edu`), for each of your two Applications:
 
 - Open the Application → left-tab bar → click **Webhooks** → find **Deploy Webhook** → copy the URL.
-- Note which one is staging and which is production. You'll paste these into GitHub secrets in Step 10 as `COOLIFY_DEPLOY_WEBHOOK_STAGING` and `COOLIFY_DEPLOY_WEBHOOK_PROD`.
-
-> **⚠️ IMPORTANT — URL rewrite required.** Coolify generates each webhook URL using the admin hostname `ml-capstone-admin.cs.byu.edu`, which is **VPN-only**. GitHub Actions runs on the public internet and can't reach that hostname. Before pasting into a GitHub secret, replace `ml-capstone-admin.cs.byu.edu` with `ml-capstone.cs.byu.edu` (public — routed via CS IT's HAProxy). Everything after `/api/v1/deploy?uuid=...` stays exactly the same. Example:
->
-> ```
-> Coolify UI shows:  https://ml-capstone-admin.cs.byu.edu/api/v1/deploy?uuid=xyz&force=false
-> Paste as secret:   https://ml-capstone.cs.byu.edu/api/v1/deploy?uuid=xyz&force=false
-> ```
->
-> If you forget this, GitHub Actions' deploy step fails with `curl: (6) Could not resolve host: ml-capstone-admin.cs.byu.edu`.
+- Note which one is staging and which is production. You'll paste these into GitHub secrets in Step 10 as `COOLIFY_DEPLOY_WEBHOOK_STAGING` and `COOLIFY_DEPLOY_WEBHOOK_PROD`. Paste them verbatim — no rewriting needed.
 
 ### 9. Create a Coolify API token (in Coolify)
 
@@ -501,21 +492,11 @@ The webhook is `deploy`-scoped by itself, but the GitHub Actions job needs a Bea
 
 | Secret name | Value |
 |---|---|
-| `COOLIFY_DEPLOY_WEBHOOK_STAGING` | Deploy Webhook URL from the staging Application (⚠️ rewritten — see below) |
-| `COOLIFY_DEPLOY_WEBHOOK_PROD` | Deploy Webhook URL from the production Application (⚠️ rewritten — see below) |
+| `COOLIFY_DEPLOY_WEBHOOK_STAGING` | Deploy Webhook URL from the staging Application (paste verbatim from Coolify) |
+| `COOLIFY_DEPLOY_WEBHOOK_PROD` | Deploy Webhook URL from the production Application (paste verbatim from Coolify) |
 | `COOLIFY_API_TOKEN` | The `deploy`-scoped token you just created |
 
-> **⚠️ CRITICAL — the two webhook URLs must be rewritten before pasting.** Coolify's UI gives you URLs like `https://ml-capstone-admin.cs.byu.edu/api/v1/deploy?uuid=...`. That hostname is **VPN-only** — GitHub Actions runs on the public internet and cannot resolve it. Before pasting into either secret, change `ml-capstone-admin.cs.byu.edu` → `ml-capstone.cs.byu.edu` (public, routed via CS IT's HAProxy). Keep the `/api/v1/deploy?uuid=...&force=false` tail exactly as-is.
->
-> ```
-> Coolify UI shows:  https://ml-capstone-admin.cs.byu.edu/api/v1/deploy?uuid=xyz&force=false
-> Paste as secret:   https://ml-capstone.cs.byu.edu/api/v1/deploy?uuid=xyz&force=false
->                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^ change this part only
-> ```
->
-> If you forget, GitHub Actions' deploy step fails with `curl: (6) Could not resolve host: ml-capstone-admin.cs.byu.edu`. It's the single most common walkthrough mistake — take a second to double-check both values.
-
-(Secret names match the ones used in the `sentiment-test-app` reference workflow so you can copy the workflow file as a template.)
+Secret names match the ones used in the `sentiment-test-app` reference workflow so you can copy the workflow file as a template.
 
 ### 11. Prove the pipeline: make a real code change (and see tests catch a bug)
 
@@ -677,8 +658,8 @@ Both should now return the 0.1.2 responses. **Your entire pipeline is proven end
 
 - **GitHub Actions red on `test` job** — usually intentional (Step D above). Update your test to match your code change (Step E) OR revert the code change if it was a mistake.
 - **GitHub Actions red on `deploy-staging` or `deploy-prod`** — the curl failed. Two common causes:
-  - `curl: (6) Could not resolve host: ml-capstone-admin.cs.byu.edu` → you forgot to rewrite the webhook URL in Step 10. Fix the secret, push another commit.
   - `curl: The requested URL returned error: 405` → your workflow file has `curl` without `-X POST`. See `.github/workflows/ci.yml` — the deploy job should call `curl -fsSL -X POST "..."`.
+  - `curl: (6) Could not resolve host: ...` → the DNS record for that hostname isn't reachable from GitHub Actions' runners. Check with the instructor.
 - **Coolify Deployments panel shows a red deploy** — click into it, read the build log. Common: Dockerfile references a file you didn't commit; `EXPOSE` port doesn't match Coolify's Port setting; container binds `127.0.0.1` instead of `0.0.0.0`.
 - **502 Bad Gateway on the live URL** — container is still starting (wait 30s), or crashed on startup (check Coolify container logs).
 - **Live URL returns old version** — Coolify built but didn't swap containers, OR your browser cached. Hard refresh (Cmd/Ctrl+Shift+R), then check the Deployments log to confirm a new container was started.

@@ -8,7 +8,7 @@
 This is the **server-side** setup guide for `rigel.cs.byu.edu`, the GPU-equipped front-end machine that hosts:
 
 - **LiteLLM** — the single proxy fronting the two GPU inference boxes (`castor`, `pollux`), exposed to students as `ml-capstone.cs.byu.edu:4000`
-- **Coolify** — a self-hosted, GitHub-webhook-driven "push to deploy" platform students use for their class projects; admin UI at `ml-capstone-admin.cs.byu.edu` (live, VPN-only, GitHub OAuth login)
+- **Coolify** — a self-hosted, GitHub-webhook-driven "push to deploy" platform students use for their class projects; admin UI at `ml-capstone-admin.cs.byu.edu` (live, publicly reachable via CS IT HAProxy, gated by GitHub OAuth invite-only signin)
 - **TLJH (The Littlest JupyterHub)** — JupyterHub for classes that need notebooks; runs behind Coolify's Traefik, uses qsynology-served LDAP homes (same auth as `castor` and `pollux`). **Currently deferred** — port 8080 conflicts with Coolify's own proxy; needs re-planning.
 - **4× NVIDIA A6000 GPUs** — available to student Docker containers via Coolify for GPU-accelerated deploys
 

@@ -11,7 +11,7 @@ Everything past prerequisites is script-driven — students self-provision their
 Before you onboard anyone, verify the following are live (most of these were set up during the initial cluster build — see [`admin-guide.md`](admin-guide.md) and [`coolify-runbook.md`](coolify-runbook.md) for how):
 
 - The cluster is healthy — run `./scripts/smoke-test-cluster.sh` (14/14 expected)
-- Coolify admin UI reachable at `https://ml-capstone-admin.cs.byu.edu` (VPN only)
+- Coolify admin UI reachable at `https://ml-capstone-admin.cs.byu.edu` (public via CS IT HAProxy; gated by OAuth invite-only signin)
 - Wildcard DNS `*.ml-capstone.cs.byu.edu` → rigel is live
 - The `byu-ml-capstone` GitHub org exists with you (and ideally a co-instructor) as Owners
 - The `byu-ml-capstone-coolify` GitHub App is installed on the org with All Repositories access
