@@ -1,9 +1,9 @@
 # Continue + classroom LiteLLM — testing playground
 
-Small scratch workspace for eyeballing what the classroom cluster actually produces. Open **this folder** (not the parent `Qwen-coder-cluster/`) in VS Code, so the `.vscode/settings.json` here becomes the workspace-level config and forces Continue on / Copilot off just for this folder.
+Small scratch workspace for eyeballing what the classroom cluster actually produces. Open **this folder** (not the parent `ml-capstone-platform/`) in VS Code, so the `.vscode/settings.json` here becomes the workspace-level config and forces Continue on / Copilot off just for this folder.
 
 ```bash
-code /Users/snell/classes/BigData/Qwen-coder-cluster/test-playground
+code ~/classes/BigData/ml-capstone-platform/test-playground
 ```
 
 Everywhere else (other projects), your global preferences apply — Copilot on, Continue autocomplete off — so this workspace is the only place the classroom cluster does inline suggestions.
