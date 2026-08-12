@@ -363,12 +363,21 @@ You'll create your class repo **inside the org**, not under your personal accoun
 
 - Go to **https://github.com/byu-ml-capstone/hello-world-app**
 - Click the green **"Use this template"** button → **"Create a new repository"**
-- **Owner:** `byu-ml-capstone` (from the dropdown)
-- **Repository name:** something identifiable, e.g., `ml-capstone-<yourname>` or `<groupname>`
+- **Owner:** `byu-ml-capstone` (from the dropdown — NOT your personal account)
+- **Repository name:** follow the class convention **`<team-slug>-<app>`** where `<team-slug>` matches your Coolify team's URL slug and `<app>` describes the app. Examples:
+  - Individual sandbox phase: `alice-sandbox-hello`, `alice-sandbox-sentiment`
+  - Group phase: `group-1-sentiment`, `group-3-recommender`
+  - The alignment between repo name → team slug → deploy domain (`alice-sandbox.ml-capstone.cs.byu.edu`) keeps the mental model consistent as your project grows.
 - **Public** or **Private** — either works; Private is fine and matches production practice
 - Click **Create repository from template**
 
-You now have a fresh repo at `github.com/byu-ml-capstone/<your-name>` populated with a minimal FastAPI (`/`, `/health`, `/languages`) and the 3-job CI/CD workflow. The `byu-ml-capstone-coolify` App already has access to it — no install step needed.
+You now have a fresh repo at `github.com/byu-ml-capstone/<team-slug>-<app>` populated with a minimal FastAPI (`/`, `/health`, `/languages`) and the 3-job CI/CD workflow. The `byu-ml-capstone-coolify` App already has access to it — no install step needed.
+
+**Finding your repo later:** org repos do NOT appear on your personal GitHub profile by default. To find yours:
+- **Bookmark it** — the URL is stable: `github.com/byu-ml-capstone/<your-repo>`
+- **Org page:** https://github.com/byu-ml-capstone lists every repo you have access to
+- **Sidebar chip:** when you're signed in, GitHub shows the `byu-ml-capstone` avatar in the left sidebar of your dashboard — click it to jump to the org
+- **Pin it to your profile:** on your repo's page, hover the ⭐ area → the "..." menu offers "Pin repository" — pinned repos DO show on your public profile
 
 ### 5. Create your production Application
 

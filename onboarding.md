@@ -155,6 +155,25 @@ After provisioning: students sign in via GitHub OAuth (email on their GitHub acc
 
 Applications are still created by students (Coolify's API supports app creation but classroom pedagogy is better if students walk the UI themselves the first time).
 
+## Repo naming convention in the class org
+
+30 students + one org = namespace collisions if everyone names their repo `hello-world-app`. The convention documented in [`student-guide.md`](student-guide.md) Step 4 is:
+
+```
+<team-slug>-<app>
+```
+
+Examples:
+- Individual sandbox phase: `alice-sandbox-hello`, `alice-sandbox-sentiment`
+- Group phase: `group-1-sentiment`, `group-3-recommender`
+
+`<team-slug>` should be a lowercased, dash-separated version of the student's Coolify team name (e.g., "Alice's Sandbox" → `alice-sandbox`). This aligns:
+- Repo path: `byu-ml-capstone/alice-sandbox-hello`
+- Coolify team: "Alice's Sandbox"
+- Deploy domain: `alice-sandbox.ml-capstone.cs.byu.edu` (production) or `alice-sandbox-staging.ml-capstone.cs.byu.edu` (staging)
+
+If you'd rather use GitHub username as the prefix instead (e.g., `qsnell-hello`), that also works — just be consistent and document your choice in the syllabus/intro handout.
+
 ## Invite students to the class GitHub org
 
 **Runs from your laptop, not rigel** (needs `gh` CLI authenticated as an Owner of `byu-ml-capstone`). Reads the same roster CSV:
