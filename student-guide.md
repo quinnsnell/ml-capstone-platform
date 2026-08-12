@@ -467,25 +467,29 @@ When you DO need GPU:
 
 Repeat for the other Application.
   
-### 8. Grab the Deploy Webhook URLs
+### 8. Grab the Deploy Webhook URLs (in Coolify)
 
-Each Application has a Deploy Webhook URL that triggers *just the container swap* (no auto-git-check). GitHub Actions will hit these.
+Each Coolify Application has a Deploy Webhook URL that triggers *just the container swap* (no auto-git-check). GitHub Actions will hit these.
 
-- In each Application → **Webhooks → Deploy Webhook** → copy the URL.
-- Note which one is staging and which is production. You'll paste these into GitHub secrets as `COOLIFY_DEPLOY_WEBHOOK_STAGING` and `COOLIFY_DEPLOY_WEBHOOK_PROD`.
+**Still in Coolify** (`https://ml-capstone-admin.cs.byu.edu`), for each of your two Applications:
 
-### 9. Create a Coolify API token
+- Open the Application → left-tab bar → click **Webhooks** → find **Deploy Webhook** → copy the URL.
+- Note which one is staging and which is production. You'll paste these into GitHub secrets in Step 10 as `COOLIFY_DEPLOY_WEBHOOK_STAGING` and `COOLIFY_DEPLOY_WEBHOOK_PROD`.
 
-The webhook is `deploy`-scoped by itself, but the GitHub Actions job needs a Bearer token to call it:
+### 9. Create a Coolify API token (in Coolify)
 
-- Top-right avatar → **Keys & Tokens → API Tokens → + New Token**
+The webhook is `deploy`-scoped by itself, but the GitHub Actions job needs a Bearer token to call it.
+
+**Still in Coolify** (not GitHub — Coolify has its own Keys & Tokens page):
+
+- Top-right of Coolify's UI → click your **avatar / profile icon** → **Keys & Tokens → API Tokens → + New Token**
 - **Description**: `github-actions`
 - **Permissions**: check `deploy` only (nothing more; least-privilege)
-- **Create** → copy the token immediately (shown once).
+- **Create** → copy the token immediately (Coolify shows it exactly once — if you lose it you'll have to make a new one).
 
-### 10. Add three secrets to your GitHub repo
+### 10. Add three secrets to your GitHub repo (in GitHub)
 
-Go to your GitHub repo → **Settings → Secrets and variables → Actions → New repository secret**. Add all three:
+**Now switch back to GitHub.** Go to your class repo (e.g., `github.com/byu-ml-capstone/<your-repo>`) → **Settings** (repo settings, not org) → left sidebar **Secrets and variables → Actions → New repository secret**. Add all three:
 
 | Secret name | Value |
 |---|---|
