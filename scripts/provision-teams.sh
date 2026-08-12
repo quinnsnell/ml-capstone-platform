@@ -183,7 +183,7 @@ for tbl in users teams team_user servers server_settings standalone_dockers; do
 done
 
 if (( schema_ok )); then
-    printf '  Schema:           OK — all required columns present across 5 tables\n'
+    printf '  Schema:           OK — all required columns present across %d tables\n' "${#REQUIRED_COLS[@]}"
 else
     echo
     echo "ERROR: Coolify schema does not match what this script expects." >&2
