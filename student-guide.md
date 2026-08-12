@@ -476,6 +476,15 @@ Each Coolify Application has a Deploy Webhook URL that triggers *just the contai
 - Open the Application → left-tab bar → click **Webhooks** → find **Deploy Webhook** → copy the URL.
 - Note which one is staging and which is production. You'll paste these into GitHub secrets in Step 10 as `COOLIFY_DEPLOY_WEBHOOK_STAGING` and `COOLIFY_DEPLOY_WEBHOOK_PROD`.
 
+> **⚠️ IMPORTANT — URL rewrite required.** Coolify generates each webhook URL using the admin hostname `ml-capstone-admin.cs.byu.edu`, which is **VPN-only**. GitHub Actions runs on the public internet and can't reach that hostname. Before pasting into a GitHub secret, replace `ml-capstone-admin.cs.byu.edu` with `ml-capstone.cs.byu.edu` (public — routed via CS IT's HAProxy). Everything after `/api/v1/deploy?uuid=...` stays exactly the same. Example:
+>
+> ```
+> Coolify UI shows:  https://ml-capstone-admin.cs.byu.edu/api/v1/deploy?uuid=xyz&force=false
+> Paste as secret:   https://ml-capstone.cs.byu.edu/api/v1/deploy?uuid=xyz&force=false
+> ```
+>
+> If you forget this, GitHub Actions' deploy step fails with `curl: (6) Could not resolve host: ml-capstone-admin.cs.byu.edu`.
+
 ### 9. Create a Coolify API token (in Coolify)
 
 The webhook is `deploy`-scoped by itself, but the GitHub Actions job needs a Bearer token to call it.
