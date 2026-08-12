@@ -309,8 +309,9 @@ You'll:
 1. Sign into Coolify with your GitHub account
 2. Find your team and verify the `ml-capstone` server is attached
 3. Create a Project containing production + staging Environments
-4. Create one Application per Environment (both pointing at your GitHub repo, different branches)
-5. Copy the Deploy Webhook URLs into GitHub Actions secrets so pushes trigger deploys
+4. Accept the `byu-ml-capstone` org invite + create your class repo from the `hello-world-app` template inside the org
+5. Create one Application per Environment (both pointing at your class repo, different branches)
+6. Copy the Deploy Webhook URLs into GitHub Actions secrets so pushes trigger deploys
 
 ### 1. Sign in
 
@@ -324,7 +325,7 @@ In the sidebar (or top bar depending on version), click the team switcher. You s
 
 **Why servers matter.** Every Application you create in Coolify has to be *deployed somewhere*. In cloud-PaaS terms, a "server" is a compute target — the physical or virtual machine that runs your containers. Your team already has one attached, called **`ml-capstone`**. Behind the scenes it's a shared physical box (`rigel.cs.byu.edu`, 4× A6000 GPUs) that hosts every team's containers — but the abstract name `ml-capstone` lets your instructor move workloads to different hardware later without changing anything you see.
 
-Navigate to **Servers**. You should see one server called **`ml-capstone`** with a green "reachable" indicator. If it's red or missing, or clicking into it 500s, tell the instructor before continuing.
+Left sidebar → **Servers**. You should see one server called **`ml-capstone`** with a green "reachable" indicator. That's all you need to check — you don't need to click into the server; the details page is admin-oriented. If the server is missing, tell the instructor before continuing.
 
 ### 3. Create a Project + Environments
 
@@ -366,31 +367,44 @@ You now have a fresh repo at `github.com/byu-ml-capstone/<your-name>` populated 
 
 Inside your project → click into the **production** Environment → **+ Add Resource**.
 
-You'll see several options. Click **Private Repository (with GitHub App)** — **NOT** the similarly-named "Private Repository (with Deploy Key)" tile. Those look almost identical but are completely different auth flows:
+You'll see several tiles. Click **Private Repository (with GitHub App)** — **NOT** the similarly-named "Private Repository (with Deploy Key)" tile. Those look almost identical but are completely different auth flows:
 
 - **Private Repository (with GitHub App)** ← this one — uses the `byu-ml-capstone-coolify` App the instructor set up. Correct choice.
-- **Private Repository (with Deploy Key)** ← *not* this — uses an SSH deploy key Coolify generates and expects you to paste into your repo. Different auth path; won't pair with the App and will silently fail deploys.
+- **Private Repository (with Deploy Key)** ← *not* this — uses an SSH deploy key you'd have to paste into your repo yourself. Different auth path; won't pair with the App and will silently fail deploys.
 
-Then fill in:
+Coolify's Application-create flow now walks you through four screens:
 
-- **Source**: `byu-ml-capstone-coolify`
-- **Repository**: your class repo (e.g., `byu-ml-capstone/ml-capstone-<yourname>`)
+**Screen 1 — Select a destination.** Coolify wants to know which Docker network to run your container on. Pick **`coolify`** (should be the only option). This is the Docker network on the `ml-capstone` server your team owns.
+
+**Screen 2 — Select a source.** Pick **`byu-ml-capstone-coolify`**. Coolify contacts GitHub and pulls the list of repos the App can see under the org.
+
+**Screen 3 — Select repository.** Pick your class repo (e.g., `byu-ml-capstone/ml-capstone-<yourname>`). Click **Load Repository** to fetch its branches and Dockerfile.
+
+**Screen 4 — Configuration.** Fill in:
+
 - **Branch**: `main`
 - **Build Pack**: `Dockerfile`
-- **Server**: `ml-capstone` (should be the only option)
-- Click **Save** — do NOT deploy yet.
+- **Base Directory**: leave blank (Dockerfile is at repo root)
+- **Port**: `8000` (matches the `EXPOSE 8000` in the template's Dockerfile — change this later if your app uses a different port)
+- **Is it a static site?**: No
+- Click **Continue** — lands you on the Application's General page.
 
-Then on the Application's General page:
+On the General page:
 
-- **Domain**: replace Coolify's auto-generated random subdomain with your team's prod domain. Format: `https://<team-slug>.ml-capstone.cs.byu.edu` — your instructor will tell you the slug. Example: Group 3 → `https://group-3.ml-capstone.cs.byu.edu`.
-- **Save**.
+- **Domain**: replace the auto-generated random subdomain with your team's prod domain. Format: `https://<team-slug>.ml-capstone.cs.byu.edu` — your instructor will tell you the slug. Example: Group 3 → `https://group-3.ml-capstone.cs.byu.edu`.
+- **Save** — do NOT click Deploy yet. Auto-deploy needs turning off (Step 7) before your first deploy fires.
 
 ### 6. Create your staging Application
 
-Switch to the **staging** Environment (breadcrumb / project sidebar). Same steps as production, with two changes:
+Navigate up to the project (breadcrumb at top) → click into the **staging** Environment → **+ Add Resource → Private Repository (with GitHub App)**. Same 4-screen flow as production, with two changes on Screen 4:
 
 - **Branch**: `staging`
+- (everything else identical: Build Pack `Dockerfile`, Port `8000`, no static site)
+
+Then on the General page:
+
 - **Domain**: `https://<team-slug>-staging.ml-capstone.cs.byu.edu`
+- **Save** (don't deploy yet).
 
 ### 7. Turn OFF auto-deploy on both Applications
 
@@ -429,15 +443,26 @@ Go to your GitHub repo → **Settings → Secrets and variables → Actions → 
 
 ### 11. Prove the pipeline works (before writing new code)
 
-Push any tiny commit (e.g., a README typo) to the `staging` branch:
+The template repo already has a working `main` branch, but no `staging` branch yet. Create one from your laptop:
 
 ```bash
+git clone https://github.com/byu-ml-capstone/<your-repo>.git
+cd <your-repo>
 git checkout -b staging
-echo "  " >> README.md && git add README.md && git commit -m "test staging deploy"
 git push -u origin staging
 ```
 
-Watch **Actions** on your repo — the `test` job runs, then `deploy-staging` fires the webhook. In ~30–60 seconds, visit `https://<team-slug>-staging.ml-capstone.cs.byu.edu` — you should get whatever's already in the repo's Dockerfile. Repeat for `main` → `https://<team-slug>.ml-capstone.cs.byu.edu`.
+That first push to `staging` triggers GitHub Actions → the `test` job runs pytest → then `deploy-staging` fires the Coolify staging webhook. Watch the Actions tab on your repo. In ~30–60 seconds, visit `https://<team-slug>-staging.ml-capstone.cs.byu.edu/health` — you should get `{"ok": true, "version": "0.1.1"}`.
+
+Then merge staging back into main to trigger the production deploy:
+
+```bash
+git checkout main
+git merge staging
+git push
+```
+
+Actions runs again → `deploy-prod` fires → `https://<team-slug>.ml-capstone.cs.byu.edu/health` returns the same JSON.
 
 If both URLs respond, your Coolify setup is done. Everything after this is code.
 
