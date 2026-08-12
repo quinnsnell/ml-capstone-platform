@@ -8,7 +8,9 @@ Historical + active tickets we've sent (or plan to send) to BYU CS IT. Kept for 
 
 ## Active
 
-_None as of 2026-08-11._
+| File | What it asks for | Sent |
+|---|---|---|
+| [`active-ml-capstone-admin-public-alias.md`](active-ml-capstone-admin-public-alias.md) | Make `ml-capstone-admin.cs.byu.edu` publicly resolvable + HAProxy SNI passthrough (eliminates the student-facing URL-rewrite footgun) | 2026-08-12 |
 
 ## Archive (resolved or superseded)
 
