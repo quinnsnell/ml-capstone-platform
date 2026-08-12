@@ -349,7 +349,7 @@ Team
 
 > **Prereq:** you need a GitHub repository at this point. If your team doesn't have one yet, either:
 > - Create an empty repo now and add code later during Section 1, OR
-> - **Use the [`hello-world-app`](https://github.com/quinnsnell/hello-world-app) template.** It's a minimal FastAPI (`/`, `/health`, `/languages`) with the same 3-job CI/CD workflow used by the reference app. Good for proving the pipeline works before you start building your real app. Go to https://github.com/quinnsnell/hello-world-app → click the green **"Use this template"** button → **"Create a new repository"** → name it under your GitHub account. One click, no clone/copy required.
+> - **Use the [`hello-world-app`](https://github.com/quinnsnell/hello-world-app) template.** It's a minimal FastAPI (`/`, `/health`, `/languages`) with the same 3-job CI/CD workflow used by the reference app. Good for proving the pipeline works before you start building your real app. Go to https://github.com/quinnsnell/hello-world-app → click the green **"Use this template"** button → **"Create a new repository"** → owner = your GitHub account, name = **`ml-capstone-hello-world-app`** (the `ml-capstone-` prefix keeps all your class repos grouped together once you have a few). One click, no clone/copy required.
 
 Before creating Applications, Coolify needs read + webhook access to your repo:
 
