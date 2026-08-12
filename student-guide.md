@@ -701,7 +701,7 @@ Same repo, same Applications, same domain as your hello-world deploy — you jus
 You already have a Coolify Application wired to your class repo. Reuse it — replace the code in your existing repo rather than creating a fresh one. That way the Deploy Webhook URLs, secrets, and domain all stay the same.
 
 ```bash
-cd ~/classes/BigData/<your-repo>
+cd path/to/<your-repo>          # wherever you cloned it during Setup Step 11
 git checkout staging
 # You'll make all the changes on staging, test them, then merge to main.
 ```
