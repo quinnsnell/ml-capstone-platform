@@ -328,7 +328,7 @@ Restart Coolify's proxy from the UI. First cert issuance takes a couple minutes 
    - Webhooks: Read & write
    - Deployments: Read & write (optional)
 7. **Subscribe to events:** Push, Pull request.
-8. **Where can this app be installed?** Only on this account.
+8. **Where can this app be installed?** **Any account.** Critical: if this is set to "Only on this account" (the default), students will not be able to install the App on their own personal GitHub accounts and the whole self-serve deploy flow breaks. If you already created the App with the default and need to change it later: https://github.com/settings/apps/ml-capstone-coolify (as the App owner) → scroll to this setting → change → Save.
 9. Create the app → generate a **private key** (download the `.pem`).
 10. Note the **App ID** and **Client ID**.
 11. **Install App** → install it on the class org, "All repositories."

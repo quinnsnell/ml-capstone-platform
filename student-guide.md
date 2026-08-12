@@ -351,7 +351,7 @@ Team
 > - Create an empty repo now and add code later during Section 1, OR
 > - **Use the [`hello-world-app`](https://github.com/quinnsnell/hello-world-app) template.** It's a minimal FastAPI (`/`, `/health`, `/languages`) with the same 3-job CI/CD workflow used by the reference app. Good for proving the pipeline works before you start building your real app. Go to https://github.com/quinnsnell/hello-world-app → click the green **"Use this template"** button → **"Create a new repository"** → owner = your GitHub account, name = **`ml-capstone-hello-world-app`** (the `ml-capstone-` prefix keeps all your class repos grouped together once you have a few). One click, no clone/copy required.
 
-Before creating Applications, Coolify needs read + webhook access to your repo:
+Before creating Applications, Coolify needs read + webhook access to your repo. The instructor has published a GitHub App called `ml-capstone-coolify` that you install on your class repo — it fires webhooks to Coolify whenever you push.
 
 - Sidebar → **Sources**. You should see **`ml-capstone-coolify`** already listed (the instructor set this up). This is Coolify's *side* of the integration — no button here to install on your repo.
 - To install the App on your repo, go directly to **https://github.com/apps/ml-capstone-coolify** in a browser signed into your GitHub account.
