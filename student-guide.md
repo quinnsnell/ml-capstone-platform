@@ -505,26 +505,87 @@ The webhook is `deploy`-scoped by itself, but the GitHub Actions job needs a Bea
 
 | Secret name | Value |
 |---|---|
-| `COOLIFY_DEPLOY_WEBHOOK_STAGING` | Deploy Webhook URL from the staging Application |
-| `COOLIFY_DEPLOY_WEBHOOK_PROD` | Deploy Webhook URL from the production Application |
+| `COOLIFY_DEPLOY_WEBHOOK_STAGING` | Deploy Webhook URL from the staging Application (⚠️ rewritten — see below) |
+| `COOLIFY_DEPLOY_WEBHOOK_PROD` | Deploy Webhook URL from the production Application (⚠️ rewritten — see below) |
 | `COOLIFY_API_TOKEN` | The `deploy`-scoped token you just created |
 
-(Names match the ones used in the `sentiment-test-app` reference workflow so you can copy the workflow file as a template.)
+> **⚠️ CRITICAL — the two webhook URLs must be rewritten before pasting.** Coolify's UI gives you URLs like `https://ml-capstone-admin.cs.byu.edu/api/v1/deploy?uuid=...`. That hostname is **VPN-only** — GitHub Actions runs on the public internet and cannot resolve it. Before pasting into either secret, change `ml-capstone-admin.cs.byu.edu` → `ml-capstone.cs.byu.edu` (public, routed via CS IT's HAProxy). Keep the `/api/v1/deploy?uuid=...&force=false` tail exactly as-is.
+>
+> ```
+> Coolify UI shows:  https://ml-capstone-admin.cs.byu.edu/api/v1/deploy?uuid=xyz&force=false
+> Paste as secret:   https://ml-capstone.cs.byu.edu/api/v1/deploy?uuid=xyz&force=false
+>                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^ change this part only
+> ```
+>
+> If you forget, GitHub Actions' deploy step fails with `curl: (6) Could not resolve host: ml-capstone-admin.cs.byu.edu`. It's the single most common walkthrough mistake — take a second to double-check both values.
 
-### 11. Prove the pipeline works (before writing new code)
+(Secret names match the ones used in the `sentiment-test-app` reference workflow so you can copy the workflow file as a template.)
 
-The template repo already has a working `main` branch, but no `staging` branch yet. Create one from your laptop:
+### 11. Prove the pipeline: make a real code change, watch it deploy
+
+You've configured everything. Now the actual test — an end-to-end code change from your laptop → live URL. This walkthrough mirrors the day-to-day workflow you'll use for the rest of the semester.
+
+**Prep: clone your repo locally.**
 
 ```bash
 git clone https://github.com/byu-ml-capstone/<your-repo>.git
 cd <your-repo>
-git checkout -b staging
-git push -u origin staging
 ```
 
-That first push to `staging` triggers GitHub Actions → the `test` job runs pytest → then `deploy-staging` fires the Coolify staging webhook. Watch the Actions tab on your repo. In ~30–60 seconds, visit `http://<team-slug>-staging.ml-capstone.cs.byu.edu/health` — you should get `{"ok": true, "version": "0.1.1"}`.
+You should see both `main` and `staging` branches (assuming you ticked "Include all branches" in Step 4). Verify:
 
-Then merge staging back into main to trigger the production deploy:
+```bash
+git branch -a
+# Expected:
+#   * main
+#     remotes/origin/main
+#     remotes/origin/staging
+```
+
+If `staging` isn't there, create it:
+
+```bash
+git checkout -b staging
+git push -u origin staging
+git checkout main
+```
+
+**Step A — Make a real code change on `staging`.**
+
+Bump the version so you can watch it change on the live URL. Open `greetings.py`, find the `APP_VERSION` line, change `0.1.1` → `0.1.2`.
+
+```bash
+git checkout staging
+# edit greetings.py — change APP_VERSION = "0.1.1" to "0.1.2"
+git diff greetings.py    # sanity check
+git add greetings.py
+git commit -m "bump version to 0.1.2"
+git push
+```
+
+**Step B — Watch it flow through GitHub Actions.**
+
+Open `https://github.com/byu-ml-capstone/<your-repo>/actions` in a browser. You should see a new workflow run appear within seconds. Watch the `test` job run (~30s) → `deploy-staging` job fire (~5s).
+
+Common failure at this step:
+- **`curl: (6) Could not resolve host: ml-capstone-admin.cs.byu.edu`** — you forgot to rewrite the webhook URL in Step 10. Fix the secret, push another commit.
+- **`curl: The requested URL returned error: 405`** — someone deployed a stale workflow file without `-X POST`. Check `.github/workflows/ci.yml`'s deploy jobs — should be `curl -fsSL -X POST "..."` not `curl -fsSL "..."`.
+
+**Step C — Verify the deploy landed.**
+
+Open the Coolify Application's **Deployments** tab. You should see a new deployment fire in real time (~10s after Actions' deploy-staging step). Watch it run: pull → build → healthcheck → healthy.
+
+Then visit `http://<team-slug>-staging.ml-capstone.cs.byu.edu/health` in a browser. Should return:
+
+```json
+{"ok": true, "version": "0.1.2"}
+```
+
+The version number confirms your code change actually made it into the running container. If you see `0.1.1`, the deploy went to Coolify but Docker cached the old image somewhere; hit **Deploy** manually in Coolify to force a fresh build.
+
+**Step D — Promote staging → production.**
+
+Merge staging back into main:
 
 ```bash
 git checkout main
@@ -532,14 +593,19 @@ git merge staging
 git push
 ```
 
-Actions runs again → `deploy-prod` fires → `http://<team-slug>.ml-capstone.cs.byu.edu/health` returns the same JSON.
+Watch Actions again — this time `deploy-prod` fires instead of `deploy-staging`. Then `http://<team-slug>.ml-capstone.cs.byu.edu/health` returns `{"ok": true, "version": "0.1.2"}`.
 
-If both URLs respond, your Coolify setup is done. Everything after this is code.
+If both URLs return the bumped version, your entire pipeline is working end-to-end. Everything after this is code.
 
-**If a URL doesn't respond after 2 minutes:**
-- Check GitHub Actions logs — did the webhook curl 2xx?
-- Check the Coolify UI → your Application → **Deployments** — did a deploy attempt fire? Green or red?
-- 502 for a few seconds after a deploy is normal (container starting). 502 that persists = the app crashed on startup; look at container logs in Coolify.
+**Step E — Try one more iteration for muscle memory.**
+
+Add a new language to the greetings dict in `greetings.py`. Something like `"it": "Ciao, mondo"`. Bump the version again. Push to staging, watch it deploy, then hit `http://<team-slug>-staging.ml-capstone.cs.byu.edu/?lang=it` — should return `{"hello": "Ciao, mondo"}`.
+
+**Debugging failures:**
+- **GitHub Actions red** — click into the failed job → expand the failed step → read the error. Most common: forgot to rewrite webhook URLs (Step 10), or the workflow file has `curl` without `-X POST`.
+- **Coolify Deployments panel shows a red deploy** — click into it, read the build log. Common: Dockerfile references a file you didn't commit; `EXPOSE` port doesn't match Coolify's Port setting; container binds `127.0.0.1` instead of `0.0.0.0`.
+- **502 Bad Gateway on the live URL** — container is still starting (wait 30s), or crashed on startup (check container logs in Coolify).
+- **Live URL returns old version** — Coolify built but didn't swap containers, OR your browser cached. Hard refresh (Cmd/Ctrl+Shift+R), then check the Deployments log to confirm a new container was started.
 
 ## Section 1: Build your first deployable app
 
