@@ -686,19 +686,25 @@ Both should now return the 0.1.2 responses. **Your entire pipeline is proven end
 
 ## Section 1: Build your first deployable app
 
-Let's build a small text-analysis service that uses the classroom LLM. Same pattern as the reference `sentiment-test-app` — you'll build it from scratch to see every piece.
+**The trajectory:** you started from `hello-world-app` (2 endpoints, no ML). By the end of this section, you'll have grown it into an LLM-backed sentiment classifier — structurally like the reference `byu-ml-capstone/sentiment-test-app`, which you can peek at whenever you want to see "what does this look like when it's done?" You're not going to fork sentiment-test-app; you're going to *build up to it*, one file at a time, so you understand every piece.
 
-> **If you used `hello-world-app/` to prove the Coolify pipeline** in the Setup section: you can either replace its contents with the sentiment app below (same repo, same Applications, no reconfig needed), or keep it as a "known-good" sandbox in a separate repo and start a new repo for the sentiment app. Both work.
+Same repo, same Applications, same domain as your hello-world deploy — you just replace the code inside your existing class repo (`byu-ml-capstone/<team-slug>-hello-world-app` or however you named it). Coolify redeploys on your next push automatically.
 
-### 1a. Create the repo
+### 1a. Start from your existing repo (don't create a new one)
+
+You already have a Coolify Application wired to your class repo. Reuse it — replace the code in your existing repo rather than creating a fresh one. That way the Deploy Webhook URLs, secrets, and domain all stay the same.
 
 ```bash
-mkdir sentiment-app
-cd sentiment-app
-git init -b main
+cd ~/classes/BigData/<your-repo>
+git checkout staging
+# You'll make all the changes on staging, test them, then merge to main.
 ```
 
-### 1b. Write `main.py`
+### 1b. Replace the code with a sentiment classifier
+
+You can delete `greetings.py`, `main.py`, and `tests/test_api.py` from the template — you'll replace them entirely with what's below. Keep `Dockerfile`, `docker-compose.yaml`, `requirements.txt`, `.github/workflows/ci.yml`, `conftest.py`. Those stay the same shape; only the code inside changes.
+
+### 1c. Write `main.py`
 
 A FastAPI service with two endpoints — `/health` for status, `/analyze` for text classification via the classroom LLM.
 
@@ -798,7 +804,7 @@ Key patterns to notice:
 - **`os.environ.get("LITELLM_URL", "default")`** — reads the LLM URL from an env var. Never hardcode it. Different envs (local, prod) supply different values.
 - **`app.run(host="0.0.0.0")`** happens inside the container via uvicorn (see Dockerfile) — binding to loopback would make the container unreachable from Coolify's proxy.
 
-### 1c. Write `requirements.txt`
+### 1d. Write `requirements.txt`
 
 ```
 fastapi==0.115.6
@@ -807,7 +813,7 @@ httpx==0.28.1
 pydantic==2.10.5
 ```
 
-### 1d. Write the `Dockerfile`
+### 1e. Write the `Dockerfile`
 
 ```dockerfile
 FROM python:3.12-slim
@@ -832,7 +838,7 @@ Two Dockerfile gotchas that trip most students:
 1. **Must listen on `0.0.0.0`, not `127.0.0.1`.** Inside a container, binding to loopback means nothing outside the container can reach you. That's `--host 0.0.0.0` in the uvicorn command.
 2. **`EXPOSE 8000`** matches the port Coolify's proxy expects. Your instructor's Application config maps their internal port to yours; the convention is `:8000`.
 
-### 1e. Write a `.gitignore`
+### 1f. Write a `.gitignore`
 
 ```gitignore
 __pycache__/
@@ -844,7 +850,7 @@ venv/
 .pytest_cache/
 ```
 
-### 1f. Add a `.env` for local development
+### 1g. Add a `.env` for local development
 
 Create a file called `.env` with:
 
@@ -1438,7 +1444,7 @@ If your app calls the classroom LLM (like the sentiment app above), point at the
 Set these via **env vars**, never hardcode:
 
 - **In prod (Coolify):** ask your instructor to add `LITELLM_URL`, `LITELLM_API_KEY`, `MODEL` to your Application's Environment Variables in Coolify.
-- **In local dev:** use the `.env` file pattern from Section 1f.
+- **In local dev:** use the `.env` file pattern from Section 1g.
 - **In your code:** read via `os.environ["LITELLM_URL"]` (Python) or `process.env.LITELLM_URL` (Node), etc.
 
 Full working example: `github.com/byu-ml-capstone/sentiment-test-app`.
