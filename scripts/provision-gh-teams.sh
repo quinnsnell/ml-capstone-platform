@@ -234,36 +234,54 @@ fi
 echo
 echo "Executing…"
 
+apply_fails=0
+
 for team_name in "${!TEAM_SLUG[@]}"; do
     slug="${TEAM_SLUG[$team_name]}"
 
-    # Ensure team exists
+    # Ensure team exists. If it exists under a different slug than our computed one,
+    # GitHub's create API will fail because the *name* is unique per org — surface
+    # that clearly so the operator can rename the Coolify team or manually align.
     team_state=$(gh api "/orgs/$ORG/teams/$slug" --jq .slug 2>/dev/null || echo "")
     if [[ -z "$team_state" ]]; then
-        gh api -X POST "/orgs/$ORG/teams" \
-            -f name="$team_name" \
-            -f description="Provisioned by provision-gh-teams.sh from roster" \
-            -f privacy="closed" >/dev/null
+        create_err=$(gh api -X POST "/orgs/$ORG/teams" -f name="$team_name" -f description="Provisioned by provision-gh-teams.sh from roster" -f privacy="closed" 2>&1 >/dev/null || true)
+        if [[ -n "$create_err" ]]; then
+            printf '  FAIL     create team "%s" — %s\n' "$team_name" "$(echo "$create_err" | head -1)"
+            apply_fails=$((apply_fails + 1))
+            continue
+        fi
+        # Re-fetch actual slug (GitHub may have normalized differently than our slugify)
+        actual_slug=$(gh api "/orgs/$ORG/teams" --jq ".[] | select(.name == \"$team_name\") | .slug" 2>/dev/null | head -1)
+        if [[ -n "$actual_slug" && "$actual_slug" != "$slug" ]]; then
+            printf '  NOTE     team "%s" created with slug=%s (differs from computed %s — using actual)\n' "$team_name" "$actual_slug" "$slug"
+            slug="$actual_slug"
+        fi
         printf '  CREATED  team "%s" (slug=%s)\n' "$team_name" "$slug"
     fi
 
     # Add members
-    members=$(echo "${TEAM_MEMBERS[$slug]}" | tr ' ' '\n' | sort -u | grep -v '^$')
+    members=$(echo "${TEAM_MEMBERS[$slug]:-${TEAM_MEMBERS[${TEAM_SLUG[$team_name]}]:-}}" | tr ' ' '\n' | sort -u | grep -v '^$')
     while read -r member; do
         [[ -z "$member" ]] && continue
         m_state=$(gh api "/orgs/$ORG/teams/$slug/memberships/$member" --jq .state 2>/dev/null || echo "")
         if [[ "$m_state" == "active" || "$m_state" == "pending" ]]; then
             continue
         fi
-        if gh api -X PUT "/orgs/$ORG/teams/$slug/memberships/$member" -f role=member >/dev/null 2>&1; then
+        add_err=$(gh api -X PUT "/orgs/$ORG/teams/$slug/memberships/$member" -f role=member 2>&1 >/dev/null || true)
+        if [[ -z "$add_err" ]]; then
             printf '  ADDED    %s -> %s\n' "$member" "$slug"
         else
-            printf '  FAIL     could not add %s to %s (does the account exist?)\n' "$member" "$slug"
+            printf '  FAIL     add %s to %s — %s\n' "$member" "$slug" "$(echo "$add_err" | head -1)"
+            apply_fails=$((apply_fails + 1))
         fi
     done <<< "$members"
 done
 
 echo
+if (( apply_fails > 0 )); then
+    echo "FAILED: $apply_fails operation(s) did not succeed. See output above." >&2
+    exit 5
+fi
 echo "SUCCESS: teams provisioned."
 echo
 echo "Next step (per-repo, when a group creates their repo from the template):"
