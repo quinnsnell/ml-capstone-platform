@@ -247,6 +247,43 @@ EXISTING_MLCAP_SERVER_TEAMS=$(psql_ro -c "SELECT t.name FROM servers s JOIN team
 EXISTING_SERVER_SETTINGS_TEAMS=$(psql_ro -c "SELECT t.name FROM server_settings ss JOIN servers s ON s.id = ss.server_id JOIN teams t ON t.id = s.team_id WHERE s.name = 'ml-capstone' AND s.deleted_at IS NULL;")
 EXISTING_DESTINATION_TEAMS=$(psql_ro -c "SELECT t.name FROM standalone_dockers sd JOIN servers s ON s.id = sd.server_id JOIN teams t ON t.id = s.team_id WHERE s.name = 'ml-capstone' AND s.deleted_at IS NULL;")
 
+# ---- Build SQL-escaped list of roster emails (for the cleanup phase) ----
+# Coolify auto-creates a personal team on every OAuth signup. If the user is
+# already in our roster, that auto-created team is a redundant "No servers
+# found" trap page. We'll delete such teams later, but need the emails now.
+ROSTER_EMAILS_SQL=""
+while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" || "$line" =~ ^# ]] && continue
+    line=${line%$'\r'}
+    IFS=',' read -r -a F <<<"$line"
+    e=$(trim "${F[${COL_IDX[email]}]}")
+    e=${e,,}
+    [[ -z "$e" ]] && continue
+    # SQL-escape single quotes
+    esc_e=${e//\'/\'\'}
+    [[ -n "$ROSTER_EMAILS_SQL" ]] && ROSTER_EMAILS_SQL+=","
+    ROSTER_EMAILS_SQL+="'$esc_e'"
+done < <(tail -n +2 "$ROSTER")
+
+# Query for redundant personal teams for our roster users, right now.
+# (The main INSERTs below don't touch personal_team=true rows, so this list
+# stays accurate through the transaction.)
+if [[ -n "$ROSTER_EMAILS_SQL" ]]; then
+    CLEANUP_TEAMS=$(psql_ro -c "
+      SELECT DISTINCT t.id || E'\t' || t.name || E'\t' || u.email
+      FROM teams t
+      JOIN team_user tu ON tu.team_id = t.id
+      JOIN users u ON u.id = tu.user_id
+      WHERE t.personal_team = true
+        AND u.email IN ($ROSTER_EMAILS_SQL)
+        AND NOT EXISTS (SELECT 1 FROM servers s WHERE s.team_id = t.id AND s.deleted_at IS NULL);
+    ")
+else
+    CLEANUP_TEAMS=""
+fi
+plan_cleanup_teams=0
+[[ -n "$CLEANUP_TEAMS" ]] && plan_cleanup_teams=$(printf '%s\n' "$CLEANUP_TEAMS" | wc -l | tr -d ' ')
+
 # ---- Build SQL + plan in one pass ---------------------------------------
 # One transactional batch. Emits six sections per row (user / team / pivot /
 # server / server_settings / standalone_dockers), each guarded by NOT EXISTS
@@ -421,6 +458,23 @@ WHERE t.name = '$e_team_name'
 SQL
     done < <(tail -n +2 "$ROSTER")
 
+    # ---- Cleanup: delete redundant personal teams ------------------------
+    # For any user in the roster who ALSO has a Coolify auto-created personal
+    # team with zero servers, delete that personal team. Safe: the user still
+    # has the script-provisioned team (which has a server), so Coolify's team
+    # switcher will land them there on next request.
+    if [[ -n "$CLEANUP_TEAMS" ]]; then
+        # Extract just the ids (first tab-separated field)
+        cleanup_ids=$(printf '%s\n' "$CLEANUP_TEAMS" | awk -F'\t' '{print $1}' | paste -sd, -)
+        cat <<SQL
+
+-- CLEANUP: delete $plan_cleanup_teams redundant personal team(s) for roster users
+-- (Coolify auto-creates these on OAuth signup; they show 'No servers found'.)
+DELETE FROM team_user WHERE team_id IN ($cleanup_ids);
+DELETE FROM teams WHERE id IN ($cleanup_ids);
+SQL
+    fi
+
     echo "COMMIT;"
 } >"$SQL_FILE"
 
@@ -446,11 +500,20 @@ printf '    servers (name=ml-capstone)         %5d     %5d\n' "$plan_new_servers
 printf '    server_settings                    %5d     %5d\n' "$plan_new_settings"     "$plan_exist_settings"
 printf '    standalone_dockers (destinations)  %5d     %5d\n' "$plan_new_destinations" "$plan_exist_destinations"
 echo
+if (( plan_cleanup_teams > 0 )); then
+    echo "  Cleanup (will DELETE):"
+    printf '    redundant personal teams          %6d       (auto-created by Coolify on OAuth signup; empty)\n' "$plan_cleanup_teams"
+    printf '%s\n' "$CLEANUP_TEAMS" | awk -F'\t' '{printf "      - team id=%s \"%s\" (owned by %s)\n", $1, $2, $3}'
+    echo
+fi
 total_new=$((plan_new_users + plan_new_teams + plan_new_pivots + plan_new_servers + plan_new_settings + plan_new_destinations))
-if (( total_new == 0 )); then
-    echo "  Effect:    NO-OP (roster is entirely a subset of current DB state)"
+if (( total_new == 0 && plan_cleanup_teams == 0 )); then
+    echo "  Effect:    NO-OP (roster fully represented, no cleanup needed)"
 else
-    echo "  Effect:    $total_new new row(s) will be INSERTed."
+    parts=""
+    (( total_new > 0 )) && parts+="INSERT $total_new row(s)"
+    (( plan_cleanup_teams > 0 )) && parts+="${parts:+ + }DELETE $plan_cleanup_teams redundant team(s)"
+    echo "  Effect:    $parts, in one transaction."
 fi
 echo "==================================================================="
 echo
@@ -464,10 +527,11 @@ fi
 
 if (( ! APPLY )); then
     echo "READY: preflight passed, plan generated, no changes made to the database."
-    if (( total_new == 0 )); then
-        echo "        Roster is already fully represented — running --apply would be a no-op."
+    if (( total_new == 0 && plan_cleanup_teams == 0 )); then
+        echo "        Roster is already fully represented and no cleanup needed — --apply would be a no-op."
     else
-        echo "        Running --apply will INSERT $total_new row(s) in one transaction."
+        (( total_new > 0 )) && echo "        Running --apply will INSERT $total_new row(s)."
+        (( plan_cleanup_teams > 0 )) && echo "        Running --apply will also DELETE $plan_cleanup_teams redundant personal team(s)."
     fi
     if (( ! SHOW_SQL )); then
         echo "        Full SQL is at $SQL_FILE (pass --show-sql to print it here)."
@@ -526,12 +590,33 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     fi
 done < <(tail -n +2 "$ROSTER")
 
+# Verify cleanup phase — no roster user should still own an empty personal team
+if (( plan_cleanup_teams > 0 )); then
+    STILL_REDUNDANT=$(psql_ro -c "
+      SELECT DISTINCT t.id FROM teams t
+      JOIN team_user tu ON tu.team_id = t.id
+      JOIN users u ON u.id = tu.user_id
+      WHERE t.personal_team = true
+        AND u.email IN ($ROSTER_EMAILS_SQL)
+        AND NOT EXISTS (SELECT 1 FROM servers s WHERE s.team_id = t.id AND s.deleted_at IS NULL);
+    ")
+    if [[ -n "$STILL_REDUNDANT" ]]; then
+        n_still=$(printf '%s\n' "$STILL_REDUNDANT" | wc -l | tr -d ' ')
+        printf '  Cleanup ✗  %d redundant personal team(s) still present after DELETE\n' "$n_still"
+        verify_fails=$((verify_fails + 1))
+    else
+        printf '  Cleanup ✓  %d redundant personal team(s) removed\n' "$plan_cleanup_teams"
+    fi
+fi
+
 echo "==================================================================="
 if (( verify_fails > 0 )); then
     echo "VERIFY FAILED — $verify_fails row(s) missing expected state. Investigate." >&2
     exit 5
 fi
 echo
-echo "SUCCESS: $plan_data_rows row(s) processed, $total_new new DB row(s) inserted, all verified."
+summary_parts="$total_new new row(s) inserted"
+(( plan_cleanup_teams > 0 )) && summary_parts+=", $plan_cleanup_teams redundant team(s) deleted"
+echo "SUCCESS: $plan_data_rows roster row(s) processed, $summary_parts, all verified."
 echo "Students with rows in 'users' can now sign in via GitHub OAuth using the email"
-echo "in their row. Coolify will link the account on first login."
+echo "in their row. Coolify will land them directly in their provisioned team."
