@@ -12,11 +12,11 @@ You can use either capability or both. This guide walks you through setting up e
 **Install GlobalProtect and connect to the CS VPN** — the cluster is on the CS network. Only one URL (the GitHub webhook path) is reachable from the public internet; everything else, including the LLM endpoint and your deployed apps, requires VPN.
 
 - VPN gateway: `cs-vpn.byu.edu`
-- Client: GlobalProtect (BYU IT has installers and instructions)
+- Client: GlobalProtect (BYU IT has installers and instructions at vpn.byu.edu) 
 
 Also make sure you have:
 
-- A **GitHub account** (you'll deploy from a repo in your account, not a class org)
+- A **GitHub account** (you'll deploy from a repo in your account)
 - **Docker installed locally** (for testing your app before pushing)
 - **VS Code** or another editor of your choice
 
@@ -280,7 +280,7 @@ Open PR from `staging` into `main` → merge into `main`
 
 **What you (or your group) does:**
 
-- Create a shared GitHub repo (your group owner's account or the class org)
+- Create a shared GitHub repo (your group owner's account or a new one)
 - Sign into Coolify and set up your Applications — see **Setup: Sign in and create your Coolify Applications** below (one-time, ~15 min)
 - Write your app + Dockerfile + unit tests
 - Make your `/health` endpoint thorough enough to double as an automated smoke test (Section 4)
@@ -316,13 +316,15 @@ You'll:
 
 Get on the BYU VPN, then open **https://ml-capstone-admin.cs.byu.edu** and click **"Sign in with GitHub"**.
 
-Your instructor has invited you by email — as long as your GitHub account's primary email matches, you'll land in Coolify's dashboard. If you see "Registration is disabled. Please contact the administrator" after authorizing GitHub, the email on your GitHub account doesn't match the roster; tell your instructor which email to use.
+**No invite email.** Your instructor has added your email to the class roster ahead of time. When you sign in with GitHub, Coolify sees that your GitHub account's primary email matches the roster row and links you to your pre-provisioned team automatically. If you see "Registration is disabled. Please contact the administrator" after authorizing GitHub, the email on your GitHub account doesn't match the roster — tell your instructor which email to use.
 
 ### 2. Find your team + verify the server
 
 In the sidebar (or top bar depending on version), click the team switcher. You should see your team (something like `Group 3` or `Alice Sandbox`) — pick it.
 
-Navigate to **Servers**. You should see one server called **`ml-capstone`** with a green "reachable" indicator. That's the physical box (currently `rigel.cs.byu.edu`) that will run your containers. If it's red or missing, tell the instructor before continuing.
+**Why servers matter.** Every Application you create in Coolify has to be *deployed somewhere*. In cloud-PaaS terms, a "server" is a compute target — the physical or virtual machine that runs your containers. Your team already has one attached, called **`ml-capstone`**. Behind the scenes it's a shared physical box (`rigel.cs.byu.edu`, 4× A6000 GPUs) that hosts every team's containers — but the abstract name `ml-capstone` lets your instructor move workloads to different hardware later without changing anything you see.
+
+Navigate to **Servers**. You should see one server called **`ml-capstone`** with a green "reachable" indicator. If it's red or missing, or clicking into it 500s, tell the instructor before continuing.
 
 ### 3. Create a Project + Environments
 
