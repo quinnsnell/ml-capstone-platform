@@ -482,7 +482,8 @@ The webhook is `deploy`-scoped by itself, but the GitHub Actions job needs a Bea
 
 **Still in Coolify** (not GitHub — Coolify has its own Keys & Tokens page):
 
-- Top-right of Coolify's UI → click your **avatar / profile icon** → **Keys & Tokens → API Tokens → + New Token**
+- Click the **Coolify** wordmark/logo top-left to go back to the instance dashboard
+- Left sidebar → **Keys & Tokens → API Tokens → + New Token**
 - **Description**: `github-actions`
 - **Permissions**: check `deploy` only (nothing more; least-privilege)
 - **Create** → copy the token immediately (Coolify shows it exactly once — if you lose it you'll have to make a new one).
