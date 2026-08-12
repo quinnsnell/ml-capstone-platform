@@ -16,18 +16,20 @@ You can use either capability or both. This guide walks you through setting up e
 
 Also make sure you have:
 
-- A **GitHub account** (you'll deploy from a repo in your account)
+- A **GitHub account** — the email you use for GitHub must match the one your instructor has on the class roster. That's how Coolify's login and the org invite find you.
 - **Docker installed locally** (for testing your app before pushing)
 - **VS Code** or another editor of your choice
 
-Your instructor will provide:
+Your instructor has already:
 
-- **Two Coolify Deploy Webhook URLs** — one for staging, one for production. Your group uses these in your GitHub Actions workflow to trigger deploys.
-- **Two hostnames** — one for your group's staging environment (`<your-group>-staging.ml-capstone.cs.byu.edu`) and one for production (`<your-group>.ml-capstone.cs.byu.edu`). Examples throughout this guide use `Group1` as the placeholder — substitute your group's actual name.
+- Provisioned you a **Coolify Team** on the classroom cluster (you'll see it after signing in)
+- Sent you an **invitation to the `byu-ml-capstone` GitHub organization** — accept it before Step 4 of the Setup section below
+- Set up the shared **`byu-ml-capstone-coolify` GitHub App** and **`ml-capstone` deploy server** — nothing for you to install
+- Told you your **team slug** — a short name like `alice-sandbox` or `group-3` you'll use for both your GitHub repo name and your deploy domain (`<team-slug>.ml-capstone.cs.byu.edu`)
 
 All `*.ml-capstone.cs.byu.edu` subdomains resolve internally to the classroom cluster automatically — no `/etc/hosts` tweaking needed as long as you're on the CS VPN.
 
-If DNS resolution doesn't work when you're on VPN, verify with `nslookup <your-group>.ml-capstone.cs.byu.edu` — it should return an internal `10.x.x.x` address. If it returns NXDOMAIN, your VPN's DNS resolver may be misconfigured; contact your instructor.
+If DNS resolution doesn't work when you're on VPN, verify with `nslookup <your-team-slug>.ml-capstone.cs.byu.edu` — it should return an internal `10.x.x.x` address. If it returns NXDOMAIN, your VPN's DNS resolver may be misconfigured; contact your instructor.
 
 ---
 
@@ -311,7 +313,9 @@ You'll:
 3. Create a Project containing production + staging Environments
 4. Accept the `byu-ml-capstone` org invite + create your class repo from the `hello-world-app` template inside the org
 5. Create one Application per Environment (both pointing at your class repo, different branches)
-6. Copy the Deploy Webhook URLs into GitHub Actions secrets so pushes trigger deploys
+6. Turn OFF Coolify's Auto Deploy so GitHub Actions drives deploys after tests pass
+7. Copy the Deploy Webhook URLs + create an API token, paste into GitHub Actions secrets
+8. Push a commit to verify the pipeline works end-to-end
 
 ### 1. Sign in
 
