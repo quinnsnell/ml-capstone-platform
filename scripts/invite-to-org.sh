@@ -28,15 +28,17 @@
 
 set -u
 
+# ---- Load shared helpers ------------------------------------------------
+LIB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib"
+# shellcheck source=lib/common.sh
+source "$LIB_DIR/common.sh"
+
 # ---- Config -------------------------------------------------------------
 : "${ORG:=byu-ml-capstone}"
 APPLY=0
 ROSTER=""
 
-usage() {
-    sed -n '2,/^# ===*$/{ /^# ===*$/d; s/^# \{0,1\}//p; }' "$0"
-    exit 0
-}
+usage() { common_usage "$0"; exit 0; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -49,52 +51,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ---- Preflight: gh auth + org owner check -------------------------------
-echo
-echo "============================ PREFLIGHT ============================"
-
-if ! command -v gh >/dev/null 2>&1; then
-    echo "  gh CLI not found. Install: https://cli.github.com/" >&2
-    exit 3
-fi
-if ! gh auth status >/dev/null 2>&1; then
-    echo "  gh not authenticated. Run: gh auth login" >&2
-    exit 3
-fi
-
-caller=$(gh api /user --jq .login 2>/dev/null || echo "")
-[[ -z "$caller" ]] && { echo "  Could not resolve authenticated user via gh api /user" >&2; exit 3; }
-printf '  gh authenticated as: %s\n' "$caller"
-
-role=$(gh api "/orgs/$ORG/memberships/$caller" --jq .role 2>/dev/null || echo "none")
-if [[ "$role" != "admin" ]]; then
-    echo "  ERROR: caller '$caller' is not an Owner of '$ORG' (role=$role)." >&2
-    echo "  Ownership required to send org invitations." >&2
-    exit 3
-fi
-printf '  Owner role on %s: verified\n' "$ORG"
-
-echo "==================================================================="
+common_banner "PREFLIGHT"
+common_gh_org_owner_check "$ORG" || exit $?
+common_banner_end
 
 # ---- Pick roster --------------------------------------------------------
-if [[ -z "$ROSTER" ]]; then
-    ROSTER=$(ls -1t roster-*.csv 2>/dev/null | head -n1 || true)
-    if [[ -z "$ROSTER" ]]; then
-        echo "No --roster given and no roster-*.csv in $(pwd)." >&2
-        exit 2
-    fi
-    echo "Auto-picked roster: $ROSTER"
-fi
+ROSTER=$(common_pick_roster "$ROSTER") || exit $?
 [[ -r "$ROSTER" ]] || { echo "Cannot read $ROSTER" >&2; exit 2; }
 
 # ---- Parse header + validate columns ------------------------------------
-HEADER=$(head -n1 "$ROSTER" | tr -d '\r')
-IFS=',' read -r -a COLS <<<"$HEADER"
 declare -A COL_IDX=()
-for i in "${!COLS[@]}"; do COL_IDX["${COLS[$i]}"]=$i; done
-if [[ -z "${COL_IDX[github_username]+set}" ]]; then
-    echo "Roster missing required column 'github_username'. Got: $HEADER" >&2
-    exit 2
-fi
+common_csv_parse_header COL_IDX "$ROSTER"
+common_csv_require_column COL_IDX "github_username" || exit 2
 # email column is optional, used only for display
 email_idx="${COL_IDX[email]:--1}"
 
@@ -102,11 +70,10 @@ email_idx="${COL_IDX[email]:--1}"
 # For each row: query GitHub for the user's membership state in the org.
 # Emit per-row status: EXISTS-active, EXISTS-pending, INVITE (new), or SKIP.
 
-echo
-echo "============================== PLAN ==============================="
+common_banner "PLAN"
 echo "  Roster:  $ROSTER"
 echo "  Org:     $ORG"
-echo "  Mode:    $([[ $APPLY == 1 ]] && echo "APPLY" || echo "dry-run (use --apply to send)")"
+echo "  Mode:    $(common_mode_label "$APPLY")"
 echo
 
 new_invites=0
@@ -165,7 +132,7 @@ printf '    new invitations           %5d\n' "$new_invites"
 printf '    existing active members   %5d\n' "$active_members"
 printf '    pending (not accepted)    %5d\n' "$pending_members"
 printf '    skipped (no username/fail) %4d\n' "$skipped_rows"
-echo "==================================================================="
+common_banner_end
 
 if (( ! APPLY )); then
     echo

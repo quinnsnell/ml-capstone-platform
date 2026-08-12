@@ -55,6 +55,11 @@
 
 set -u
 
+# ---- Load shared helpers ------------------------------------------------
+LIB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib"
+# shellcheck source=lib/common.sh
+source "$LIB_DIR/common.sh"
+
 # ---- Config -------------------------------------------------------------
 : "${COOLIFY_DB_CONTAINER:=coolify-db}"
 : "${COOLIFY_DB_USER:=coolify}"
@@ -69,22 +74,8 @@ ROSTER=""
 # fine but flag them so the operator can decide.
 KNOWN_GOOD_MAJOR_MINOR="4.2"
 
-# ---- Small helpers ------------------------------------------------------
-# Pure-bash whitespace trim. Handles apostrophes/quotes/anything else literally —
-# DO NOT use xargs for this (it parses shell quoting and blows up on unmatched
-# single quotes like "Quinn's Sandbox").
-trim() {
-    local s="$1"
-    s="${s#"${s%%[![:space:]]*}"}"
-    s="${s%"${s##*[![:space:]]}"}"
-    printf '%s' "$s"
-}
-
 # ---- Argument parsing ---------------------------------------------------
-usage() {
-    sed -n '2,/^# ===*$/{ /^# ===*$/d; s/^# \{0,1\}//p; }' "$0"
-    exit 0
-}
+usage() { common_usage "$0"; exit 0; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -112,15 +103,7 @@ if (( CHECK_SCHEMA )); then
 fi
 
 # ---- Pick roster --------------------------------------------------------
-if [[ -z "$ROSTER" ]]; then
-    ROSTER=$(ls -1t roster-*.csv 2>/dev/null | head -n1 || true)
-    if [[ -z "$ROSTER" ]]; then
-        echo "No --roster given and no roster-*.csv in $(pwd)." >&2
-        echo "Create one — see example at roster-example.csv." >&2
-        exit 2
-    fi
-    echo "Auto-picked roster: $ROSTER"
-fi
+ROSTER=$(common_pick_roster "$ROSTER") || exit $?
 [[ -r "$ROSTER" ]] || { echo "Cannot read $ROSTER" >&2; exit 2; }
 
 # ---- Sanity: DB reachable + expected tables exist ----------------------
@@ -131,8 +114,7 @@ if ! docker exec "$COOLIFY_DB_CONTAINER" pg_isready -U "$COOLIFY_DB_USER" -d "$C
 fi
 
 # ---- Preflight: Coolify version + schema fingerprint --------------------
-echo
-echo "============================ PREFLIGHT ============================"
+common_banner "PREFLIGHT"
 
 # Detect Coolify version from the image tag on the running container.
 COOLIFY_IMAGE=$(docker inspect coolify --format '{{.Config.Image}}' 2>/dev/null || echo "")
@@ -193,7 +175,7 @@ else
     exit 3
 fi
 
-echo "==================================================================="
+common_banner_end
 
 # ---- Generate a placeholder bcrypt hash (via PHP in the coolify container)
 # Users we create authenticate via OAuth; the password column exists in Laravel's
@@ -225,15 +207,10 @@ fi
 
 # ---- Read + validate CSV ------------------------------------------------
 # Parse header, verify required columns present.
-HEADER=$(head -n1 "$ROSTER" | tr -d '\r')
-IFS=',' read -r -a COLS <<<"$HEADER"
 declare -A COL_IDX=()
-for i in "${!COLS[@]}"; do COL_IDX["${COLS[$i]}"]=$i; done
+common_csv_parse_header COL_IDX "$ROSTER"
 for required in team_name email name; do
-    if [[ -z "${COL_IDX[$required]+set}" ]]; then
-        echo "Roster missing required column '$required'. Got: $HEADER" >&2
-        exit 2
-    fi
+    common_csv_require_column COL_IDX "$required" || exit 2
 done
 
 # ---- Load existing state so we can compute a per-row plan ---------------
@@ -256,7 +233,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" || "$line" =~ ^# ]] && continue
     line=${line%$'\r'}
     IFS=',' read -r -a F <<<"$line"
-    e=$(trim "${F[${COL_IDX[email]}]}")
+    e=$(common_trim "${F[${COL_IDX[email]}]}")
     e=${e,,}
     [[ -z "$e" ]] && continue
     # SQL-escape single quotes
@@ -326,10 +303,10 @@ has_line() { grep -qxF -- "$2" <<<"$1"; }
         [[ -n "${COL_IDX[github_username]+set}" ]] && gh=${F[${COL_IDX[github_username]}]:-}
 
         # Trim + lowercase (bash-native; xargs would choke on apostrophes).
-        email=$(trim "$email_raw")
+        email=$(common_trim "$email_raw")
         email=${email,,}
-        team_name=$(trim "$team_name")
-        name=$(trim "$name")
+        team_name=$(common_trim "$team_name")
+        name=$(common_trim "$name")
 
         # Reject rows with empty required fields — silent inserts of '' would be
         # very hard to debug later, and the users.email unique constraint would
@@ -478,12 +455,11 @@ SQL
     echo "COMMIT;"
 } >"$SQL_FILE"
 
-echo
-echo "============================== PLAN ==============================="
+common_banner "PLAN"
 echo "  Roster:    $ROSTER"
 echo "  Data rows: $plan_data_rows (excluding header + blank/#-commented lines)"
 echo "  Target:    docker exec $COOLIFY_DB_CONTAINER psql -U $COOLIFY_DB_USER -d $COOLIFY_DB_NAME"
-echo "  Mode:      $([[ $APPLY == 1 ]] && echo "APPLY" || echo "dry-run (use --apply to execute)")"
+echo "  Mode:      $(common_mode_label "$APPLY")"
 echo
 echo "  Per-row plan:"
 if [[ -s "$PLAN_FILE" ]]; then
@@ -515,7 +491,7 @@ else
     (( plan_cleanup_teams > 0 )) && parts+="${parts:+ + }DELETE $plan_cleanup_teams redundant team(s)"
     echo "  Effect:    $parts, in one transaction."
 fi
-echo "==================================================================="
+common_banner_end
 echo
 
 if (( SHOW_SQL )); then
@@ -552,8 +528,7 @@ fi
 # Re-load DB state and confirm every planned CREATE actually materialized.
 # We don't just check counts; we check that the specific keys from the CSV
 # are now in the corresponding tables.
-echo
-echo "============================= VERIFY =============================="
+common_banner "VERIFY"
 
 AFTER_EMAILS=$(psql_ro -c "SELECT email FROM users;")
 AFTER_TEAMS=$(psql_ro -c "SELECT name FROM teams;")
@@ -569,8 +544,8 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" || "$line" =~ ^# ]] && continue
     line=${line%$'\r'}
     IFS=',' read -r -a F <<<"$line"
-    team_name=$(trim "${F[${COL_IDX[team_name]}]}")
-    email=$(trim "${F[${COL_IDX[email]}]}")
+    team_name=$(common_trim "${F[${COL_IDX[team_name]}]}")
+    email=$(common_trim "${F[${COL_IDX[email]}]}")
     email=${email,,}
     [[ -z "$team_name" || -z "$email" ]] && continue
 
@@ -609,7 +584,7 @@ if (( plan_cleanup_teams > 0 )); then
     fi
 fi
 
-echo "==================================================================="
+common_banner_end
 if (( verify_fails > 0 )); then
     echo "VERIFY FAILED — $verify_fails row(s) missing expected state. Investigate." >&2
     exit 5

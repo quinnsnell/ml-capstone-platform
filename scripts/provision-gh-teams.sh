@@ -37,15 +37,17 @@
 
 set -u
 
+# ---- Load shared helpers ------------------------------------------------
+LIB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib"
+# shellcheck source=lib/common.sh
+source "$LIB_DIR/common.sh"
+
 # ---- Config -------------------------------------------------------------
 : "${ORG:=byu-ml-capstone}"
 APPLY=0
 ROSTER=""
 
-usage() {
-    sed -n '2,/^# ===*$/{ /^# ===*$/d; s/^# \{0,1\}//p; }' "$0"
-    exit 0
-}
+usage() { common_usage "$0"; exit 0; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -57,14 +59,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# ---- Small helpers ------------------------------------------------------
-trim() {
-    local s="$1"
-    s="${s#"${s%%[![:space:]]*}"}"
-    s="${s%"${s##*[![:space:]]}"}"
-    printf '%s' "$s"
-}
-
+# ---- Local helpers ------------------------------------------------------
 # Deterministic team name -> team slug: lowercase, replace non-alnum runs with '-',
 # collapse repeats, trim leading/trailing dashes.
 # Examples:
@@ -77,53 +72,19 @@ slugify() {
 }
 
 # ---- Preflight: gh auth + org owner check -------------------------------
-echo
-echo "============================ PREFLIGHT ============================"
-
-if ! command -v gh >/dev/null 2>&1; then
-    echo "  gh CLI not found. Install: https://cli.github.com/" >&2
-    exit 3
-fi
-if ! gh auth status >/dev/null 2>&1; then
-    echo "  gh not authenticated. Run: gh auth login" >&2
-    exit 3
-fi
-
-caller=$(gh api /user --jq .login 2>/dev/null || echo "")
-[[ -z "$caller" ]] && { echo "  Could not resolve authenticated user via gh api /user" >&2; exit 3; }
-printf '  gh authenticated as: %s\n' "$caller"
-
-role=$(gh api "/orgs/$ORG/memberships/$caller" --jq .role 2>/dev/null || echo "none")
-if [[ "$role" != "admin" ]]; then
-    echo "  ERROR: caller '$caller' is not an Owner of '$ORG' (role=$role)." >&2
-    echo "  Owner role required to create/manage GitHub Teams." >&2
-    exit 3
-fi
-printf '  Owner role on %s: verified\n' "$ORG"
-
-echo "==================================================================="
+common_banner "PREFLIGHT"
+common_gh_org_owner_check "$ORG" || exit $?
+common_banner_end
 
 # ---- Pick roster --------------------------------------------------------
-if [[ -z "$ROSTER" ]]; then
-    ROSTER=$(ls -1t roster-*.csv 2>/dev/null | head -n1 || true)
-    if [[ -z "$ROSTER" ]]; then
-        echo "No --roster given and no roster-*.csv in $(pwd)." >&2
-        exit 2
-    fi
-    echo "Auto-picked roster: $ROSTER"
-fi
+ROSTER=$(common_pick_roster "$ROSTER") || exit $?
 [[ -r "$ROSTER" ]] || { echo "Cannot read $ROSTER" >&2; exit 2; }
 
 # ---- Parse header + validate columns ------------------------------------
-HEADER=$(head -n1 "$ROSTER" | tr -d '\r')
-IFS=',' read -r -a COLS <<<"$HEADER"
 declare -A COL_IDX=()
-for i in "${!COLS[@]}"; do COL_IDX["${COLS[$i]}"]=$i; done
+common_csv_parse_header COL_IDX "$ROSTER"
 for req in team_name github_username; do
-    if [[ -z "${COL_IDX[$req]+set}" ]]; then
-        echo "Roster missing required column '$req'. Got: $HEADER" >&2
-        exit 2
-    fi
+    common_csv_require_column COL_IDX "$req" || exit 2
 done
 
 # ---- Build in-memory plan -----------------------------------------------
@@ -139,7 +100,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     line=${line%$'\r'}
     IFS=',' read -r -a F <<<"$line"
 
-    team_name=$(trim "${F[${COL_IDX[team_name]}]:-}")
+    team_name=$(common_trim "${F[${COL_IDX[team_name]}]:-}")
     gh_user=$(echo "${F[${COL_IDX[github_username]}]:-}" | tr -d ' \r\n')
 
     [[ -z "$team_name" ]] && continue
@@ -159,11 +120,10 @@ if (( ${#TEAM_SLUG[@]} == 0 )); then
 fi
 
 # ---- Plan ---------------------------------------------------------------
-echo
-echo "============================== PLAN ==============================="
+common_banner "PLAN"
 echo "  Roster:  $ROSTER"
 echo "  Org:     $ORG"
-echo "  Mode:    $([[ $APPLY == 1 ]] && echo "APPLY" || echo "dry-run (use --apply to execute)")"
+echo "  Mode:    $(common_mode_label "$APPLY")"
 echo
 echo "  Teams to ensure exist + their members:"
 teams_to_create=0
@@ -220,7 +180,7 @@ printf '    teams to create           %5d\n' "$teams_to_create"
 printf '    teams already existing    %5d\n' "$teams_existing"
 printf '    members to add            %5d\n' "$members_to_add"
 printf '    members already in team   %5d\n' "$members_existing"
-echo "==================================================================="
+common_banner_end
 
 if (( ! APPLY )); then
     echo
