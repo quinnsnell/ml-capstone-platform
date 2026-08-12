@@ -13,7 +13,7 @@ Before you onboard anyone, verify:
 - The cluster is healthy — run `./scripts/smoke-test-cluster.sh` (14/14 expected)
 - `ml-capstone.cs.byu.edu` and `ml-capstone-admin.cs.byu.edu` resolve internally
 - CS IT has added the wildcard `*.ml-capstone.cs.byu.edu` → rigel (delivered 2026-08-11 — all subdomains under `ml-capstone.cs.byu.edu` resolve internally to the cluster)
-- The `ml-capstone-coolify` GitHub App exists and is installed on the class GitHub org (if any)
+- The `byu-ml-capstone-coolify` GitHub App exists and is installed on the class GitHub org (if any)
 - Coolify's OAuth is enabled with GitHub (Settings → OAuth)
 
 If any of the above are missing, see [`admin-guide.md`](admin-guide.md) and [`coolify-runbook.md`](coolify-runbook.md) first.
@@ -26,10 +26,10 @@ If any of the above are missing, see [`admin-guide.md`](admin-guide.md) and [`co
 
 Options (pick one, be consistent across all groups):
 
-- **Class GitHub org (recommended):** create `<class-org>/group1` empty repo. Install the `ml-capstone-coolify` GitHub App on it (or on the whole org — one-time).
-- **Student's personal account:** one student owns the group's repo. They install the `ml-capstone-coolify` GitHub App on their repo when they onboard.
+- **Class GitHub org (recommended):** create `<class-org>/group1` empty repo. Install the `byu-ml-capstone-coolify` GitHub App on it (or on the whole org — one-time).
+- **Student's personal account:** one student owns the group's repo. They install the `byu-ml-capstone-coolify` GitHub App on their repo when they onboard.
 
-Either way: the repo starts empty. Students seed it (typically by forking `github.com/quinnsnell/sentiment-test-app` as a starting template, then customizing).
+Either way: the repo starts empty. Students seed it (typically by forking `github.com/byu-ml-capstone/sentiment-test-app` as a starting template, then customizing).
 
 ### 2. DNS — nothing to do
 
@@ -60,7 +60,7 @@ Inside the group's Team, create:
 
 **Application 1 — staging**
 - Name: `group1-staging`
-- Source: `ml-capstone-coolify` GitHub App
+- Source: `byu-ml-capstone-coolify` GitHub App
 - Repository: `<class-org>/group1` (or `<student-owner>/group1`)
 - Branch: `staging`
 - Build pack: Dockerfile

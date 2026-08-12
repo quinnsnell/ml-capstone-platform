@@ -330,8 +330,8 @@ Restart Coolify's proxy from the UI. First cert issuance takes a couple minutes 
 7. **Subscribe to events:** Push, Pull request.
 8. **Make the App public** (so students can self-install without admin intervention):
    - The App is created as **Private** by default — installable only by the App owner. Students trying to install it will see "This is a private GitHub App" with no button.
-   - After creation: sign in as the App owner → https://github.com/settings/apps/ml-capstone-coolify → **Advanced** tab (leftmost sidebar of that page) → scroll to red-bordered **Danger Zone** at the bottom → click **"Make this GitHub App public"** → confirm.
-   - Verify: incognito window at https://github.com/apps/ml-capstone-coolify should now show an **Install** button, not "private GitHub App."
+   - After creation: sign in as the App owner → https://github.com/organizations/byu-ml-capstone/settings/apps/byu-ml-capstone-coolify → **Advanced** tab (leftmost sidebar of that page) → scroll to red-bordered **Danger Zone** at the bottom → click **"Make this GitHub App public"** → confirm.
+   - Verify: incognito window at https://github.com/apps/byu-ml-capstone-coolify should now show an **Install** button, not "private GitHub App."
 9. Create the app → generate a **private key** (download the `.pem`).
 10. Note the **App ID** and **Client ID**.
 11. **Install App** → install it on the class org, "All repositories."
@@ -387,7 +387,7 @@ See [`student-guide.md`](student-guide.md) → Part B → **Setup: Sign in and c
 
 1. Sign in via GitHub OAuth at `https://ml-capstone-admin.cs.byu.edu`
 2. Switch to their team via the team switcher
-3. Install the `ml-capstone-coolify` GitHub App on their class repo
+3. Install the `byu-ml-capstone-coolify` GitHub App on their class repo
 4. Create Project → prod + staging Environments → one Application per Environment (both point at the same repo, different branches: `main` for prod, `staging` for staging)
 5. Assign domain per team's convention (`<team-slug>.ml-capstone.cs.byu.edu` and `<team-slug>-staging.ml-capstone.cs.byu.edu`)
 6. Turn off Coolify's auto-deploy on both Applications (GitHub Actions drives the deploys instead)

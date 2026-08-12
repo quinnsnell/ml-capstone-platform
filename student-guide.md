@@ -275,7 +275,7 @@ Open PR from `staging` into `main` → merge into `main`
 
 - Provisions your Coolify Team + invites you by email (you sign in with your GitHub account — same email)
 - Attaches the shared `ml-capstone` deployment server to your team
-- Ensures the `ml-capstone-coolify` GitHub App is available for you to install on your repo
+- Ensures the `byu-ml-capstone-coolify` GitHub App is available for you to install on your repo
 - Wildcard DNS `*.ml-capstone.cs.byu.edu` — anything under that name resolves to the cluster
 
 **What you (or your group) does:**
@@ -345,21 +345,22 @@ Team
 - From the project overview → **+ New Environment** → name it `staging`.
 - You should now see both `production` and `staging` listed on the project page.
 
-### 4. Install the GitHub App on your repo
+### 4. Create your class repo under the `byu-ml-capstone` GitHub org
 
-> **Prereq:** you need a GitHub repository at this point. If your team doesn't have one yet, either:
-> - Create an empty repo now and add code later during Section 1, OR
-> - **Use the [`hello-world-app`](https://github.com/quinnsnell/hello-world-app) template.** It's a minimal FastAPI (`/`, `/health`, `/languages`) with the same 3-job CI/CD workflow used by the reference app. Good for proving the pipeline works before you start building your real app. Go to https://github.com/quinnsnell/hello-world-app → click the green **"Use this template"** button → **"Create a new repository"** → owner = your GitHub account, name = **`ml-capstone-hello-world-app`** (the `ml-capstone-` prefix keeps all your class repos grouped together once you have a few). One click, no clone/copy required.
+Your instructor invited you to the **[byu-ml-capstone](https://github.com/byu-ml-capstone)** GitHub organization. Check your GitHub notifications and accept the invite if you haven't already — you can also visit https://github.com/orgs/byu-ml-capstone/invitation to see pending invitations.
 
-Before creating Applications, Coolify needs read + webhook access to your repo. The instructor has published a GitHub App called `ml-capstone-coolify` that you install on your class repo — it fires webhooks to Coolify whenever you push.
+You'll create your class repo **inside the org**, not under your personal account. Why: the instructor installed the `byu-ml-capstone-coolify` GitHub App at the org level once, and that installation automatically covers every repo you create inside the org. You never have to install anything on GitHub — Coolify sees your repo as soon as it exists.
 
-- Sidebar → **Sources**. You should see **`ml-capstone-coolify`** already listed (the instructor set this up). This is Coolify's *side* of the integration — no button here to install on your repo.
-- To install the App on your repo, go directly to **https://github.com/apps/ml-capstone-coolify** in a browser signed into your GitHub account.
-- Click **Install** (or **Configure**, if it's already installed on your account for a different repo).
-- Choose your GitHub account.
-- **Only select repositories** → tick just `ml-capstone-hello-world-app` (or whatever your class repo is called) → **Install**.
+**Seed your repo from the `hello-world-app` template:**
 
-You'll be redirected back to a GitHub confirmation page. That's expected — Coolify doesn't need any redirect back to itself for the installation to work; the App will fire webhooks to Coolify automatically going forward.
+- Go to **https://github.com/byu-ml-capstone/hello-world-app**
+- Click the green **"Use this template"** button → **"Create a new repository"**
+- **Owner:** `byu-ml-capstone` (from the dropdown)
+- **Repository name:** something identifiable, e.g., `ml-capstone-<yourname>` or `<groupname>`
+- **Public** or **Private** — either works; Private is fine and matches production practice
+- Click **Create repository from template**
+
+You now have a fresh repo at `github.com/byu-ml-capstone/<your-name>` populated with a minimal FastAPI (`/`, `/health`, `/languages`) and the 3-job CI/CD workflow. The `byu-ml-capstone-coolify` App already has access to it — no install step needed.
 
 ### 5. Create your production Application
 
@@ -367,13 +368,13 @@ Inside your project → click into the **production** Environment → **+ Add Re
 
 You'll see several options. Click **Private Repository (with GitHub App)** — **NOT** the similarly-named "Private Repository (with Deploy Key)" tile. Those look almost identical but are completely different auth flows:
 
-- **Private Repository (with GitHub App)** ← this one — uses the ml-capstone-coolify App you just installed. Correct choice.
+- **Private Repository (with GitHub App)** ← this one — uses the `byu-ml-capstone-coolify` App the instructor set up. Correct choice.
 - **Private Repository (with Deploy Key)** ← *not* this — uses an SSH deploy key Coolify generates and expects you to paste into your repo. Different auth path; won't pair with the App and will silently fail deploys.
 
 Then fill in:
 
-- **Source**: `ml-capstone-coolify`
-- **Repository**: your class repo
+- **Source**: `byu-ml-capstone-coolify`
+- **Repository**: your class repo (e.g., `byu-ml-capstone/ml-capstone-<yourname>`)
 - **Branch**: `main`
 - **Build Pack**: `Dockerfile`
 - **Server**: `ml-capstone` (should be the only option)
@@ -1093,7 +1094,7 @@ For completeness, this isn't the only way. Real production ML systems also use:
 
 ### The full worked example
 
-The classroom's reference app — `github.com/quinnsnell/sentiment-test-app` — implements this pattern end-to-end. Its README's "How this app is packaged (and why)" section has:
+The classroom's reference app — `github.com/byu-ml-capstone/sentiment-test-app` — implements this pattern end-to-end. Its README's "How this app is packaged (and why)" section has:
 
 - Exact file contents for `Dockerfile.base`, `Dockerfile`, and the base-build workflow
 - Actual performance numbers (before/after)
@@ -1202,7 +1203,7 @@ Set these via **env vars**, never hardcode:
 - **In local dev:** use the `.env` file pattern from Section 1f.
 - **In your code:** read via `os.environ["LITELLM_URL"]` (Python) or `process.env.LITELLM_URL` (Node), etc.
 
-Full working example: `github.com/quinnsnell/sentiment-test-app`.
+Full working example: `github.com/byu-ml-capstone/sentiment-test-app`.
 
 ---
 
@@ -1276,4 +1277,4 @@ These bypass LiteLLM, so you must change the *model name* in your client from `c
 | Your staging URL | `Group1-staging.ml-capstone.cs.byu.edu` |
 | Your prod URL | `Group1.ml-capstone.cs.byu.edu` |
 | GitHub Actions secrets you'll set | `COOLIFY_DEPLOY_WEBHOOK_STAGING`, `COOLIFY_DEPLOY_WEBHOOK_PROD` |
-| Reference app | `github.com/quinnsnell/sentiment-test-app` |
+| Reference app | `github.com/byu-ml-capstone/sentiment-test-app` |
