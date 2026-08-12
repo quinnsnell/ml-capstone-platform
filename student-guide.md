@@ -463,8 +463,10 @@ When you DO need GPU:
 - **GPU Device Ids** → your instructor may have assigned your team a specific GPU (e.g., `0`, `1`, `2`, or `3`) to spread load across the 4× A6000s on rigel. Set that here. If unset, Docker picks any available GPU.
 - **GPU Options** → leave blank
 
-Save. Repeat for the other Application.
+**Coolify save quirk:** the per-section **Save** buttons in the Advanced tab often DON'T persist changes on their own. After flipping Auto Deploy / configuring GPU, click back to the **General** tab and hit its **Save** button — that's what actually commits your Advanced-tab changes. Verify by refreshing the Advanced tab and checking your toggles are still where you left them.
 
+Repeat for the other Application.
+  
 ### 8. Grab the Deploy Webhook URLs
 
 Each Application has a Deploy Webhook URL that triggers *just the container swap* (no auto-git-check). GitHub Actions will hit these.
