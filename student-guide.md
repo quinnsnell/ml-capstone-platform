@@ -417,10 +417,13 @@ On the General page:
 
 ### 6. Create your staging Application
 
-Navigate up to the project (breadcrumb at top) → click into the **staging** Environment → **+ Add Resource → Private Repository (with GitHub App)**. Same 4-screen flow as production, with two changes on Screen 4:
+Navigate up to the project (breadcrumb at top) → click into the **staging** Environment → **+ Add Resource → Private Repository (with GitHub App)**. Same 4-screen flow as production. On Screen 4 fill in:
 
-- **Branch**: `staging`  — the branch dropdown should include this option if you ticked "Include all branches" during Step 4's template flow. If it doesn't, you missed the checkbox; see the callout below.
-- (everything else identical: Build Pack `Dockerfile`, Port `8000`, no static site)
+- **Branch**: `staging` — the branch dropdown should include this option if you ticked "Include all branches" during Step 4's template flow. If it doesn't, you missed the checkbox; see the callout below.
+- **Build Pack**: `Dockerfile`
+- **Base Directory**: leave blank
+- **Port**: `8000` — same as production. Coolify does NOT copy this from your production Application; every Application defaults to port 3000. Overriding to 8000 is easy to forget and the deploy will look healthy but the domain returns "Bad Gateway".
+- **Is it a static site?**: No
 
 > **If the `staging` branch dropdown is missing:** you skipped "Include all branches" when creating your repo. Recover on your laptop:
 >
