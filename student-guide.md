@@ -373,6 +373,7 @@ You'll create your class repo **inside the org**, not under your personal accoun
   - Group phase: `group-1-sentiment`, `group-3-recommender`
   - The alignment between repo name → team slug → deploy domain (`alice-sandbox.ml-capstone.cs.byu.edu`) keeps the mental model consistent as your project grows.
 - **Public** or **Private** — either works; Private is fine and matches production practice
+- ✅ **CHECK the box "Include all branches"**. The template ships with `main` AND `staging` branches; by default GitHub only copies `main`. Without this checkbox you'll need to create `staging` yourself later.
 - Click **Create repository from template**
 
 You now have a fresh repo at `github.com/byu-ml-capstone/<team-slug>-<app>` populated with a minimal FastAPI (`/`, `/health`, `/languages`) and the 3-job CI/CD workflow. The `byu-ml-capstone-coolify` App already has access to it — no install step needed.
@@ -418,8 +419,19 @@ On the General page:
 
 Navigate up to the project (breadcrumb at top) → click into the **staging** Environment → **+ Add Resource → Private Repository (with GitHub App)**. Same 4-screen flow as production, with two changes on Screen 4:
 
-- **Branch**: `staging`
+- **Branch**: `staging`  — the branch dropdown should include this option if you ticked "Include all branches" during Step 4's template flow. If it doesn't, you missed the checkbox; see the callout below.
 - (everything else identical: Build Pack `Dockerfile`, Port `8000`, no static site)
+
+> **If the `staging` branch dropdown is missing:** you skipped "Include all branches" when creating your repo. Recover on your laptop:
+>
+> ```bash
+> git clone https://github.com/byu-ml-capstone/<your-repo>.git
+> cd <your-repo>
+> git checkout -b staging
+> git push -u origin staging
+> ```
+>
+> Then click the **Refresh Repository List** button in Coolify's picker (upper right of the source screen) and the `staging` branch should appear.
 
 Then on the General page:
 
