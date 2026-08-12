@@ -347,14 +347,9 @@ Team
 
 ### 4. Install the GitHub App on your repo
 
-> **Prereq:** you need a GitHub repository at this point — even an empty one is fine (Coolify won't try to deploy until you tell it to). If your team doesn't have one yet, either:
+> **Prereq:** you need a GitHub repository at this point. If your team doesn't have one yet, either:
 > - Create an empty repo now and add code later during Section 1, OR
-> - **Seed your repo from the `hello-world-app/` starter.** It's a minimal FastAPI (`/`, `/health`, `/languages`) with the same 3-job workflow used by the reference app. Good for proving the pipeline works before you start building your real app. Since `hello-world-app` lives *inside* `ml-capstone-platform` and GitHub can't fork a subdirectory, seed it manually:
->   ```bash
->   git clone https://github.com/quinnsnell/ml-capstone-platform.git
->   cp -r ml-capstone-platform/hello-world-app/. path/to/your-empty-repo/
->   cd path/to/your-empty-repo && git add . && git commit -m "seed from hello-world-app" && git push
->   ```
+> - **Use the [`hello-world-app`](https://github.com/quinnsnell/hello-world-app) template.** It's a minimal FastAPI (`/`, `/health`, `/languages`) with the same 3-job CI/CD workflow used by the reference app. Good for proving the pipeline works before you start building your real app. Go to https://github.com/quinnsnell/hello-world-app → click the green **"Use this template"** button → **"Create a new repository"** → name it under your GitHub account. One click, no clone/copy required.
 
 Before creating Applications, Coolify needs read + webhook access to your repo:
 

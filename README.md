@@ -53,7 +53,6 @@ ml-capstone-platform/
 │   ├── uninstall-qwen-cluster.sh  Reverse of the above
 │   ├── verify-qwen-host.sh        Health check on a GPU host post-install
 │   └── smoke-test-cluster.sh      End-to-end smoke test (run from your laptop over VPN)
-├── hello-world-app/       Minimal FastAPI starter — fork this for the Coolify onboarding lab
 ├── sentiment-test-app/    Reference app: LLM + local HF, base+app Docker split, integration tests
 ├── tickets/
 │   ├── active-*.md        Open coordination tickets with CS IT
@@ -88,7 +87,7 @@ Model aliases exposed by LiteLLM:
 - Wildcard DNS `*.ml-capstone.cs.byu.edu` → rigel (delivered 2026-08-11) — group URLs resolve automatically
 - Coolify admin UI at `https://ml-capstone-admin.cs.byu.edu` with GitHub OAuth (invite-gated via `Registration Allowed=off`)
 - Self-serve Coolify Teams per student/group via `scripts/provision-teams.sh` (reads a roster CSV, seeds users + teams + servers)
-- `hello-world-app/` starter + `sentiment-test-app/` reference — both fork-and-deploy ready
+- Two starter apps: [`hello-world-app`](https://github.com/quinnsnell/hello-world-app) (template repo — minimal FastAPI for the Coolify onboarding lab) and `sentiment-test-app/` (LLM + local HF reference)
 - Cluster smoke test hits 14/14
 
 **Planned:**
