@@ -1,10 +1,5 @@
 # Classroom Deployment Platform — Coolify Runbook
 
-> **⚠️ Status:** Two big pivots happened in August 2026. Reflected inline where relevant, but calling them out here:
->
-> 1. **Public entry point changed** from Cloudflare Tunnel + Let's Encrypt DNS-01 to **CS IT's HAProxy** (SNI passthrough on `haproxy1.cs.byu.edu`) + a CS-provided `*.cs.byu.edu` wildcard cert. Sections §7 (Cloudflare Tunnel) and §8 (DNS-01 TLS) are **historical**.
-> 2. **Student access model changed** from "students don't have Coolify accounts, admin creates Applications" to **self-serve teams via GitHub OAuth**. Instructor runs [`scripts/provision-teams.sh`](scripts/provision-teams.sh) from a roster CSV to create teams + user rows + server rows in one shot. Students sign in via GitHub OAuth (invite-gated) and create their own Projects → Environments → Applications per [`student-guide.md`](student-guide.md) → Part B → Setup. Section §11 below reflects this.
-
 This is the **server-side** setup guide for `rigel.cs.byu.edu`, the GPU-equipped front-end machine that hosts:
 
 - **LiteLLM** — the single proxy fronting the two GPU inference boxes (`castor`, `pollux`), exposed to students as `ml-capstone.cs.byu.edu:4000`
@@ -77,8 +72,8 @@ Only one path on `rigel` is reachable from the public internet: the GitHub webho
 Key points:
 
 - **VPN is the primary access control.** Everything on `rigel` binds to interfaces reachable via the campus network. VPN users see the machine directly.
-- **Only the webhook URL is public**, via Cloudflare Tunnel. No inbound ports opened on `rigel` for the internet at large.
-- **TLS uses DNS-01 challenge** (not HTTP-01), because port 80 is not public. Certs are still real Let's Encrypt certs, browsers trust them.
+- **Public entry point is CS IT's HAProxy**, doing SNI passthrough from `haproxy1.cs.byu.edu:443` → `rigel:443` (Traefik). Only the GitHub webhook path and the Coolify deploy API are reachable that way — everything else on `rigel` requires VPN.
+- **TLS is a CS-provided `*.cs.byu.edu` DigiCert wildcard** cert, terminated by Traefik directly from files on disk. No Let's Encrypt, no DNS-01, no API tokens. Valid 2026-07-09 → 2027-01-23; set a January renewal reminder.
 - **GPUs are per-container.** Coolify apps opt in to GPUs via Docker Compose. A6000 has no MIG, so it's one container per GPU at a time.
 - **TLJH coexists on the same host.** JupyterHub runs on `:8080` (HTTP only, localhost) and is reverse-proxied by Coolify's Traefik. Home directories are NFS-mounted from `qsynology` (matching `castor`/`pollux`), so users have the same files no matter which host they log into. TLJH-created spawner users (`jupyter-<name>`) are local, but per `dirs.home: /home/{username}`, notebooks open in the LDAP user's home, not in `/home/jupyter-<name>`.
 
@@ -95,14 +90,14 @@ Key points:
 - SSSD-joined to the classroom LDAP directory, with `/home` NFS-mounted from `qsynology` (10.55.0.30:/volume1/nethome). See `castor`'s `/etc/sssd/sssd.conf` for the reference config.
 - Root or passwordless-sudo SSH access
 
-**DNS.** Two record sets are needed:
+**DNS** (coordinate all of these with CS IT — see [`tickets/README.md`](tickets/README.md) for the ticket templates that got them):
 
-- **Internal wildcard for student apps.** `*.ml-capstone.cs.byu.edu` and `ml-capstone.cs.byu.edu` → `rigel.cs.byu.edu` (or its IP). Only needs to resolve *inside* the campus network / VPN — coordinate with CS IT.
-- **Public webhook subdomain.** `ml-capstone.cs.byu.edu` → the Cloudflare-managed CNAME the tunnel creates. This one is public because GitHub has to reach it. It only routes to the webhook path on Coolify, nothing else.
+- **Wildcard for student apps.** `*.ml-capstone.cs.byu.edu` → `rigel.cs.byu.edu`. Resolves both on VPN (for students hitting their apps) and publicly (so GitHub webhooks land at HAProxy, which forwards to rigel).
+- **Coolify admin alias.** `ml-capstone-admin.cs.byu.edu` → `rigel.cs.byu.edu`. Public; HAProxy passes SNI through to Traefik → Coolify UI.
 
-**DNS-01 API credentials.** To auto-issue TLS certs without exposing port 80 publicly, Traefik needs API access to the DNS zone that hosts `*.ml-capstone.cs.byu.edu`. Get an API token from CS IT or whichever provider manages the zone. If DNS-01 is not achievable, plain HTTP over VPN is a defensible fallback for a class — see §8.
+**TLS.** CS IT provisions a `*.cs.byu.edu` DigiCert wildcard cert. Files live on rigel at `/data/coolify/proxy/certs/star_cs_byu_edu.{fullchain.pem,key}`, and Traefik terminates TLS from those files. No Let's Encrypt or DNS-01 setup needed. The `*.cs.byu.edu` wildcard covers one level only, so `ml-capstone-admin.cs.byu.edu` gets HTTPS but two-level names like `<team>.ml-capstone.cs.byu.edu` do not — student apps serve HTTP over VPN. See §8 for the Traefik dynamic-config that wires the cert in.
 
-**Cloudflare account.** Free tier is fine. You'll need a domain on Cloudflare's nameservers (or a subdomain delegated to Cloudflare) — this is what backs `ml-capstone.cs.byu.edu`.
+**Public entry point.** CS IT's HAProxy (`haproxy1.cs.byu.edu`) does SNI passthrough to `rigel:443`. No inbound ports opened on `rigel` for the public internet directly. See §7 for the config CS IT applied.
 
 **GitHub.** A class GitHub org students will be invited to. You'll create one GitHub App scoped to that org.
 
@@ -142,7 +137,7 @@ ufw allow from <CAMPUS_CIDR> to any port 6002            # Coolify terminal
 ufw enable
 ```
 
-Replace `<CAMPUS_CIDR>` with the actual BYU campus / VPN subnet (ask CS IT). The `cloudflared` daemon does not require any inbound rules — it makes outbound connections only.
+Replace `<CAMPUS_CIDR>` with the actual BYU campus / VPN subnet (ask CS IT). The public-webhook path arrives via CS IT's HAProxy → `:443`, so no extra firewall rules are needed for internet ingress beyond the campus-CIDR-scoped `:443` rule above.
 
 ---
 
@@ -236,81 +231,78 @@ Verify from a workstation on VPN: `curl http://ml-capstone.cs.byu.edu:4000/v1/mo
 
 ---
 
-## 7. Cloudflare Tunnel — **OBSOLETE (historical)**
+## 7. Public entry via CS IT HAProxy
 
-> **⚠️ Not used in the current architecture.** Replaced 2026-08-07 by CS IT's HAProxy doing SNI passthrough on `haproxy1.cs.byu.edu → rigel:443`. Kept below for context on the original design decision. If you're setting up the class today, skip to §11 and see [`admin-guide.md`](admin-guide.md) for the current public entry point.
+The only path from the public internet to rigel is CS IT's shared HAProxy doing SNI passthrough on `haproxy1.cs.byu.edu:443 → rigel:443`. GitHub webhooks + the Coolify deploy API arrive that way; everything else on rigel stays VPN-only.
 
-The tunnel exposes exactly one URL — the GitHub webhook path — with no inbound ports opened on `rigel`.
+Setup is entirely on the CS IT side — no cloudflared, no tunnel daemon, no inbound rules on rigel beyond the campus-CIDR `:443` allow. Request via a ticket; templates in [`tickets/README.md`](tickets/README.md).
 
-```bash
-# Install cloudflared (one-time):
-curl -fsSL https://pkg.cloudflare.com/install.sh | bash
-apt-get install -y cloudflared
+What CS IT applies on their end (for reference / if a rule ever needs debugging):
 
-# Log in — opens a browser to auth with your Cloudflare account:
-cloudflared tunnel login
+```
+# HAProxy frontend (SSL passthrough — HAProxy never terminates)
+frontend ml_capstone_sni
+    bind *:443
+    mode tcp
+    tcp-request inspect-delay 5s
+    tcp-request content accept if { req_ssl_hello_type 1 }
 
-# Create the tunnel:
-cloudflared tunnel create class-coolify-webhook
-# Note the tunnel ID it prints.
+    use_backend ml_capstone if { req_ssl_sni -m end .ml-capstone.cs.byu.edu }
+    use_backend ml_capstone if { req_ssl_sni ml-capstone-admin.cs.byu.edu }
 
-# Create /etc/cloudflared/config.yml:
-cat > /etc/cloudflared/config.yml <<'EOF'
-tunnel: <TUNNEL_ID>
-credentials-file: /root/.cloudflared/<TUNNEL_ID>.json
-
-ingress:
-  - hostname: ml-capstone.cs.byu.edu
-    path: /webhooks/.*
-    service: http://localhost:8000
-  - service: http_status:404      # everything else -> 404
-EOF
-
-# Route the DNS name through the tunnel (creates a CNAME in Cloudflare DNS):
-cloudflared tunnel route dns class-coolify-webhook ml-capstone.cs.byu.edu
-
-# Install as a systemd service:
-cloudflared service install
-systemctl enable --now cloudflared
+backend ml_capstone
+    mode tcp
+    server rigel rigel.cs.byu.edu:443 send-proxy-v2
 ```
 
-The `path: /webhooks/.*` restriction means Cloudflare will only proxy the webhook path — attempts to reach `ml-capstone.cs.byu.edu/anything-else` get a 404 at the edge without touching `rigel`.
+Verify from anywhere on the public internet:
 
-Verify: `curl -I https://ml-capstone.cs.byu.edu/webhooks/source/github/events` from anywhere on the public internet. Should return a Coolify response (probably 405 Method Not Allowed on GET, which is fine — GitHub uses POST).
+```bash
+curl -I https://ml-capstone.cs.byu.edu/webhooks/source/github/events
+# Expect: 405 Method Not Allowed (GitHub POSTs; GET is fine as a reachability check)
+
+curl -I https://ml-capstone-admin.cs.byu.edu/
+# Expect: 200 or Coolify login redirect
+```
+
+Historical note: the original design used a Cloudflare Tunnel (`cloudflared` on rigel). That was retired 2026-08-07 in favor of the HAProxy path because CS IT already runs HAProxy for other campus services, and it removes an external dependency (Cloudflare account + DNS delegation) that the rest of the classroom stack didn't need.
 
 ---
 
-## 8. TLS for Student Apps via DNS-01 — **OBSOLETE (historical)**
+## 8. TLS termination — CS-provided `*.cs.byu.edu` wildcard cert
 
-> **⚠️ Not used in the current architecture.** Replaced 2026-08-07 by a CS IT-provided `*.cs.byu.edu` DigiCert wildcard cert (valid 2026-07-09 → 2027-01-23; set a January renewal reminder). Certs live at `/data/coolify/proxy/certs/star_cs_byu_edu.{fullchain.pem,key}` and Traefik terminates TLS directly from those files. No Let's Encrypt, no DNS-01, no API tokens. See §11b in the older history if you need the Traefik dynamic config that wires the cert in.
+CS IT issues a DigiCert wildcard for `*.cs.byu.edu` and hands it to us as `fullchain.pem` + `key`. Traefik (inside Coolify) terminates TLS directly from those files. No Let's Encrypt, no DNS-01, no API tokens.
 
-Traefik (inside Coolify) needs to prove control over `*.ml-capstone.cs.byu.edu` to Let's Encrypt, but we can't use HTTP-01 because port 80 is not public. DNS-01 works instead: Traefik drops a TXT record via the DNS provider's API.
+**Cert files on rigel:**
 
-In Coolify's UI: **Settings → Advanced → Custom Traefik Configuration** (path varies slightly by version). Add the DNS challenge provider config for whatever manages the DNS zone. Example for Cloudflare-hosted DNS:
+```
+/data/coolify/proxy/certs/star_cs_byu_edu.fullchain.pem
+/data/coolify/proxy/certs/star_cs_byu_edu.key
+```
+
+**Traefik dynamic config** (Coolify UI → Settings → Advanced → Custom Traefik Dynamic Configuration):
 
 ```yaml
-certificatesResolvers:
-  letsencrypt:
-    acme:
-      email: <admin@cs.byu.edu>
-      storage: /data/coolify/proxy/acme.json
-      dnsChallenge:
-        provider: cloudflare
-        resolvers:
-          - 1.1.1.1:53
-          - 8.8.8.8:53
+tls:
+  certificates:
+    - certFile: /traefik/certs/star_cs_byu_edu.fullchain.pem
+      keyFile:  /traefik/certs/star_cs_byu_edu.key
+      stores: [default]
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /traefik/certs/star_cs_byu_edu.fullchain.pem
+        keyFile:  /traefik/certs/star_cs_byu_edu.key
 ```
 
-And export the API token before restarting the proxy:
+Restart Coolify's proxy after wiring the cert in: `docker restart coolify-proxy`.
 
-```bash
-# In the Coolify env for the proxy container:
-CF_DNS_API_TOKEN=<scoped-token-with-DNS-Edit-on-the-zone>
-```
+**Coverage.** The wildcard covers one level under `cs.byu.edu`, so it covers `ml-capstone-admin.cs.byu.edu` (single level) but not two-level names like `<team>.ml-capstone.cs.byu.edu`. Consequences:
 
-Restart Coolify's proxy from the UI. First cert issuance takes a couple minutes (Let's Encrypt polls the TXT record). After that, Traefik renews automatically.
+- Coolify admin UI, LiteLLM, GitHub webhooks — all get HTTPS.
+- Student apps at `<team>.ml-capstone.cs.byu.edu` — serve **HTTP only**. Traffic is still encrypted at the VPN layer, so this is defensible for a classroom. A future two-level wildcard (separate CS IT ticket) would let student apps go HTTPS naturally.
 
-**If DNS-01 is not achievable** (e.g. CS IT won't give you an API token): fall back to plain HTTP on the internal wildcard. Students see "Not Secure" in browser but VPN provides transport encryption. Set `Force HTTPS = false` in Coolify.
+**Renewal.** Cert valid 2026-07-09 → 2027-01-23. Set a mid-January calendar reminder; CS IT will re-issue and hand off new files. Drop them in place and `docker restart coolify-proxy`.
 
 ---
 
@@ -346,9 +338,9 @@ Coolify UI: **Sources → New → GitHub App**. Fill in App ID, Client ID, Clien
 
 ## 11. Team & User Model — self-serve teams via GitHub OAuth
 
-**Pivoted 2026-08-10.** The original plan was "students don't have Coolify accounts, admin creates all Applications." That's been superseded — students sign in via GitHub OAuth, land in a pre-provisioned team, and create their own Projects, Environments, and Applications through the UI.
+Students sign in via GitHub OAuth, land in a pre-provisioned team, and create their own Projects, Environments, and Applications through the UI. The instructor's ongoing per-student workload is (in the steady state) zero — the term-start provisioning scripts do all the setup.
 
-Why the pivot: GitHub OAuth eliminates the password-management friction of individual accounts. Students click "Sign in with GitHub" once, no new password. That flips the trade-off — self-serve is now roughly as easy to set up as admin-provisioning, but has much better long-term properties (nearly zero ongoing professor workload, higher educational value, matches industry pattern).
+Rationale: GitHub OAuth eliminates the password-management friction of individual accounts. Students click "Sign in with GitHub" once, no new password. Self-serve is roughly as easy to set up as admin-provisioning would be, but has much better long-term properties (nearly zero ongoing professor workload, higher educational value, matches industry pattern).
 
 ### Admin accounts
 
@@ -387,7 +379,7 @@ See [`student-guide.md`](student-guide.md) → Part B → **Setup: Sign in and c
 
 1. Sign in via GitHub OAuth at `https://ml-capstone-admin.cs.byu.edu`
 2. Switch to their team via the team switcher
-3. Install the `byu-ml-capstone-coolify` GitHub App on their class repo
+3. Use `github.com/byu-ml-capstone/hello-world-app` "Use this template" → owner = `byu-ml-capstone`, name = `<team-slug>-<app>`. The org-level `byu-ml-capstone-coolify` App installation already covers the new repo automatically — no per-repo App install step.
 4. Create Project → prod + staging Environments → one Application per Environment (both point at the same repo, different branches: `main` for prod, `staging` for staging)
 5. Assign domain per team's convention (`<team-slug>.ml-capstone.cs.byu.edu` and `<team-slug>-staging.ml-capstone.cs.byu.edu`)
 6. Turn off Coolify's auto-deploy on both Applications (GitHub Actions drives the deploys instead)
@@ -466,20 +458,21 @@ Coolify will pass `--gpus 1` to Docker on deploy. If all GPUs are taken, the con
 
 ## 14. Student-Facing Flow
 
-Students never touch Coolify. What they see and do:
+Under the self-serve model (§11), students DO touch Coolify — just once, during the ~15-minute onboarding lab in [`student-guide.md`](student-guide.md) → Part B → Setup. After that, day-to-day "deploying" is `git push`. What that looks like end-to-end:
 
-1. Instructor sends them (a) their assigned GitHub repo in the class org, and (b) their assigned app URL, e.g. `alice.ml-capstone.cs.byu.edu` (VPN only).
-2. Clone the repo, write code, commit, `git push origin main`.
-3. Within ~1 minute the webhook fires → Coolify pulls, builds, redeploys → their app is live at the assigned URL.
-4. If they need env vars (secrets, API keys), they ask an admin to add them via Coolify UI — env vars intentionally aren't in the repo.
-5. Need a GPU? Include the Docker Compose GPU block in their repo (§13). If a GPU can't be reserved, the container fails to start and the admin surfaces the error.
+1. Student edits code locally on a feature branch, `git push` to their fork/branch on `github.com/byu-ml-capstone/<team-slug>-<app>`.
+2. GitHub Actions runs unit tests + docker build on any push. On green, if the branch is `staging` or `main`, Actions fires the corresponding Coolify Deploy Webhook via `curl -X POST`.
+3. Coolify pulls, builds, runs the container, then polls `/health`. If `/health` returns 2xx, the new container takes over; otherwise the previous version keeps serving.
+4. Student hits their app URL — `<team-slug>-staging.ml-capstone.cs.byu.edu` or `<team-slug>.ml-capstone.cs.byu.edu` — and sees the update.
 
-For students, "deploying" is `git push`. Nothing else. Give them the URL and the repo — they don't need to know Coolify exists.
+**When a deploy fails**, students have two feedback channels:
 
-**What students see when a deploy fails:** the auto-deploy either succeeds or leaves the previous version running. There's no UI feedback for students unless the admin surfaces build logs. Practical mitigations:
+- **GitHub Actions tab** shows unit test / docker build failures immediately (no VPN required to see them). This is the first line of defense — most issues surface here before Coolify gets involved.
+- **Coolify Deployments tab** (their team's Application → Deployments) shows Coolify-side failures: build errors, health-check failures, container crashes. Students can read logs themselves; no admin surfacing needed.
 
-- Encourage a GitHub Actions workflow that runs `docker build .` on every push so students see build failures in GitHub's UI before Coolify tries.
-- Give students an admin's contact for "my push didn't seem to update the site" issues — usually a build error the admin can paste from Coolify.
+**Env vars / secrets** go directly into each Application's **Configuration → Environment Variables** in Coolify. The onboarding lab (student-guide Step 10) walks through this. Repo secrets (webhook URLs, `COOLIFY_API_TOKEN`) live in GitHub Actions secrets; app-runtime secrets (LLM keys, DB creds) live in Coolify env vars — never commit either to the repo.
+
+**GPU access** is opt-in via `docker-compose.yaml` in the student's repo — see §13.
 
 ---
 
@@ -505,8 +498,8 @@ Student app *data* is a per-app problem — students configure backups for their
 **End of semester:**
 
 1. Export team + resource list.
-2. Revoke the GitHub App's org installation.
-3. `systemctl stop cloudflared` (kills the public webhook path).
+2. Revoke the GitHub App's org installation (or leave it — it's harmless when no repos use it).
+3. Ask CS IT to disable the HAProxy SNI passthrough for the class hostnames if you want the public entry point closed.
 4. `docker compose -f /data/coolify/source/docker-compose.yml down`.
 5. Snapshot `/data/coolify` if you want to preserve state.
 6. LiteLLM container is independent — leave it or `docker rm -f litellm`.
@@ -517,10 +510,10 @@ Student app *data* is a per-app problem — students configure backups for their
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Student push doesn't trigger deploy | `cloudflared` crashed, or GitHub webhook can't reach edge | `systemctl status cloudflared`; check GitHub App → Advanced → Recent Deliveries; retry from there |
+| Student push doesn't trigger deploy | GitHub webhook failed, HAProxy dropped the connection, or Actions job never fired the curl | GitHub Actions tab first; then GitHub App → Advanced → Recent Deliveries; then HAProxy diagnostic (see [`troubleshooting.md`](troubleshooting.md) "CS IT HAProxy returns EOF") |
 | Build fails with "no space left" | Docker build cache full | Run the prune cron manually |
 | All apps 502 | Traefik crashed or Coolify updated mid-request | `docker restart coolify-proxy` |
-| TLS cert renewal fails | DNS-01 API token expired or revoked | Rotate CF token; restart proxy |
+| TLS cert about to expire | `*.cs.byu.edu` DigiCert expires 2027-01-23 | File CS IT ticket for renewal; drop new files in `/data/coolify/proxy/certs/`; `docker restart coolify-proxy` (§8) |
 | LiteLLM unreachable | Container died, or firewall reload dropped rules | `docker ps`; re-apply `ufw allow` lines |
 | GPU app fails: "could not select device driver" | NVIDIA Container Toolkit not installed / Docker not restarted | Re-run §4; `systemctl restart docker` |
 | GPU app fails: "no such device" or "all GPUs in use" | Another container has claimed all 4 (or TLJH is holding some) | `nvidia-smi` to identify; ask the holder to stop |
@@ -533,9 +526,10 @@ Student app *data* is a per-app problem — students configure backups for their
 ## 18. Why This Design
 
 - **Coolify over Dokku:** students learn the GitHub-webhook workflow that mirrors industry CI/CD.
-- **GitHub App over OAuth:** one credential to manage, org-scoped, one-click revoke at term end.
+- **GitHub App (for repo auth) + GitHub OAuth (for Coolify sign-in):** one credential to manage per role, org-scoped, one-click revoke at term end. Students sign in via OAuth (invite-gated by roster) instead of maintaining separate Coolify passwords.
+- **Self-serve teams over admin-provisioned Applications:** students click "Sign in with GitHub," land in their pre-provisioned team, and create their own Projects/Environments/Applications. Instructor's ongoing per-student workload drops to near zero, and students learn the real Coolify workflow instead of a stripped-down admin-only view.
 - **Coexists with LiteLLM on `rigel`:** LiteLLM is CPU-cheap and needs no GPU. Coolify + LiteLLM + LLM proxy on one box is easier to reason about than two.
-- **VPN + Cloudflare Tunnel (one narrow route) instead of public exposure:** the box has zero inbound ports open to the internet. GitHub webhooks reach Coolify via the tunnel, everything else lives on the campus network.
-- **DNS-01 instead of HTTP-01:** real Let's Encrypt certs without exposing port 80 publicly. Works because `*.ml-capstone.cs.byu.edu` only needs to resolve on VPN, not to Let's Encrypt.
+- **CS IT HAProxy as the public entry point** (SNI passthrough, `haproxy1.cs.byu.edu:443 → rigel:443`): no cloudflared daemon on rigel, no external Cloudflare dependency, no DNS delegation. Only the GitHub webhook path and the Coolify deploy API are reachable from the internet; everything else stays VPN-only.
+- **CS-provided `*.cs.byu.edu` wildcard cert** instead of Let's Encrypt: no ACME challenge dance, no API tokens to rotate. Trade-off: single-level wildcard only, so student apps at `<team>.ml-capstone.cs.byu.edu` serve HTTP (VPN encrypts them anyway).
 - **GPUs on `rigel` for student containers:** students can deploy GPU-accelerated apps (inference, small training, media). A6000-per-container is a hard cap — plan a policy before demand outstrips supply.
 - **TLJH on the same box:** consolidates the JupyterHub deployment for GPU-heavy classes. Home directories on qsynology mean users see the same files whether they log into `castor`, `pollux`, or `rigel`. Coolify's Traefik terminates TLS for both student apps and TLJH — one cert lifecycle.
