@@ -4,8 +4,9 @@ This is the **server-side** setup guide for `rigel.cs.byu.edu`, the GPU-equipped
 
 - **LiteLLM** — the single proxy fronting the two GPU inference boxes (`castor`, `pollux`), exposed to students as `ml-capstone.cs.byu.edu:4000`
 - **Coolify** — a self-hosted, GitHub-webhook-driven "push to deploy" platform students use for their class projects; admin UI at `ml-capstone-admin.cs.byu.edu` (live, publicly reachable via CS IT HAProxy, gated by GitHub OAuth invite-only signin)
-- **TLJH (The Littlest JupyterHub)** — JupyterHub for classes that need notebooks; runs behind Coolify's Traefik, uses qsynology-served LDAP homes (same auth as `castor` and `pollux`). **Currently deferred** — port 8080 conflicts with Coolify's own proxy; needs re-planning.
 - **4× NVIDIA A6000 GPUs** — available to student Docker containers via Coolify for GPU-accelerated deploys
+
+TLJH (JupyterHub) is NOT deployed on rigel — it lives on other hosts (`castor`, `pollux`, `vega`) for classes that need notebooks. Rigel is Coolify + LiteLLM only.
 
 Students learn the industry-standard flow: push to a GitHub repo → tests run in Actions → deploy webhook fires → Coolify pulls, builds, deploys, routes traffic.
 
@@ -60,7 +61,6 @@ Only one path on `rigel` is reachable from the public internet: the GitHub webho
 |  Coolify UI           :8000                                                   |
 |  Coolify realtime     :6001                                                   |
 |  Coolify terminal     :6002                                                   |
-|  TLJH (JupyterHub)    :8080        SSSD/LDAP auth, qsynology-mounted /home    |
 |                                                                               |
 |  Docker + NVIDIA Container Toolkit                                            |
 |   +------------------------------------------+                                |
@@ -96,7 +96,6 @@ Key points:
 - **Public entry point is CS IT's HAProxy**, doing SNI passthrough from `haproxy1.cs.byu.edu:443` → `rigel:443` (Traefik). Only the GitHub webhook path and the Coolify deploy API are reachable that way — everything else on `rigel` requires VPN.
 - **TLS is a CS-provided `*.cs.byu.edu` DigiCert wildcard** cert, terminated by Traefik directly from files on disk. No Let's Encrypt, no DNS-01, no API tokens. Valid 2026-07-09 → 2027-01-23; set a January renewal reminder.
 - **GPUs are per-container.** Coolify apps opt in to GPUs via Docker Compose. A6000 has no MIG, so it's one container per GPU at a time.
-- **TLJH coexists on the same host.** JupyterHub runs on `:8080` (HTTP only, localhost) and is reverse-proxied by Coolify's Traefik. Home directories are NFS-mounted from `qsynology` (matching `castor`/`pollux`), so users have the same files no matter which host they log into. TLJH-created spawner users (`jupyter-<name>`) are local, but per `dirs.home: /home/{username}`, notebooks open in the LDAP user's home, not in `/home/jupyter-<name>`.
 
 ---
 
@@ -127,13 +126,12 @@ Key points:
 | Port | Service | Notes |
 |------|---------|-------|
 | 22   | SSH     | Admin only |
-| 80   | Traefik | Internal — VPN clients hitting HTTP student apps + TLJH via reverse proxy (redirects to 443) |
-| 443  | Traefik | Internal — VPN clients hitting HTTPS student apps + TLJH via reverse proxy |
+| 80   | Traefik | Internal — VPN clients hitting HTTP student apps (redirects to 443 where applicable) |
+| 443  | Traefik | Internal — VPN clients hitting HTTPS student apps + admin UI |
 | 4000 | LiteLLM | Internal — students' editors |
 | 8000 | Coolify UI | Internal — VPN clients only |
 | 6001 | Coolify realtime | Internal |
 | 6002 | Coolify terminal | Internal |
-| 8080 | TLJH    | Localhost only — Coolify's Traefik reverse-proxies HTTPS to it |
 | 2049 | NFS     | Outbound only, to qsynology (10.55.0.30) for `/home` |
 
 ---
@@ -450,7 +448,7 @@ Under the self-serve model (§11), each team is its own quota domain. Set the sa
 
 `rigel` has 4× A6000. A6000 doesn't support MIG, so it's one container per GPU at a time. Decide the policy up front:
 
-**Recommended default: one GPU per team, first-come-first-served, "please stop when done."** Coolify won't schedule this — it just fails the container start if all GPUs are claimed. Communicate the etiquette in the student guide. If TLJH classes on this box also need GPU sessions, subtract those reservations from the pool (e.g. 1 GPU pinned to TLJH → 3 GPUs available to Coolify).
+**Recommended default: one GPU per team, first-come-first-served, "please stop when done."** Coolify won't schedule this — it just fails the container start if all GPUs are claimed. Communicate the etiquette in the student guide.
 
 For a student to opt into GPU access, they add this to their app's Docker Compose:
 
@@ -537,9 +535,7 @@ Student app *data* is a per-app problem — students configure backups for their
 | TLS cert about to expire | `*.cs.byu.edu` DigiCert expires 2027-01-23 | File CS IT ticket for renewal; drop new files in `/data/coolify/proxy/certs/`; `docker restart coolify-proxy` (§8) |
 | LiteLLM unreachable | Container died, or firewall reload dropped rules | `docker ps`; re-apply `ufw allow` lines |
 | GPU app fails: "could not select device driver" | NVIDIA Container Toolkit not installed / Docker not restarted | Re-run §4; `systemctl restart docker` |
-| GPU app fails: "no such device" or "all GPUs in use" | Another container has claimed all 4 (or TLJH is holding some) | `nvidia-smi` to identify; ask the holder to stop |
-| TLJH login fails, "user not found" | SSSD not running or LDAP unreachable | `systemctl status sssd`; `getent passwd <user>`; check qsynology reachability |
-| TLJH notebook opens in `/home/jupyter-<user>` not `/home/<user>` | `dirs.home` config lost | `sudo tljh-config set dirs.home /home/{username} && sudo tljh-config reload` |
+| GPU app fails: "no such device" or "all GPUs in use" | Another container has claimed all 4 | `nvidia-smi` to identify; ask the holder to stop |
 | `rigel` fully offline | Hardware / network / OS | Coolify + LiteLLM + apps all down until recovery. LLM users can fall back to direct-to-vLLM on castor/pollux — see the admin guide's emergency section |
 
 ---
@@ -553,4 +549,4 @@ Student app *data* is a per-app problem — students configure backups for their
 - **CS IT HAProxy as the public entry point** (SNI passthrough, `haproxy1.cs.byu.edu:443 → rigel:443`): no cloudflared daemon on rigel, no external Cloudflare dependency, no DNS delegation. Only the GitHub webhook path and the Coolify deploy API are reachable from the internet; everything else stays VPN-only.
 - **CS-provided `*.cs.byu.edu` wildcard cert** instead of Let's Encrypt: no ACME challenge dance, no API tokens to rotate. Trade-off: single-level wildcard only, so student apps at `<team>.ml-capstone.cs.byu.edu` serve HTTP (VPN encrypts them anyway).
 - **GPUs on `rigel` for student containers:** students can deploy GPU-accelerated apps (inference, small training, media). A6000-per-container is a hard cap — plan a policy before demand outstrips supply.
-- **TLJH on the same box:** consolidates the JupyterHub deployment for GPU-heavy classes. Home directories on qsynology mean users see the same files whether they log into `castor`, `pollux`, or `rigel`. Coolify's Traefik terminates TLS for both student apps and TLJH — one cert lifecycle.
+- **No TLJH on rigel:** rigel is Coolify + LiteLLM only. Classes that need JupyterHub use `castor`, `pollux`, or `vega`, which keep TLJH separate from the Coolify/webhook infra.

@@ -2,7 +2,7 @@
 
 This is the **server-side** setup guide. It covers building, running, and maintaining the three-machine inference cluster. Students get their own document — hand out [`student-guide.md`](student-guide.md) for the client-side setup (Continue, opencode, or GitHub Copilot BYOK) and the Coolify deploy lab. The front-end host also runs Coolify for student app deployments — see [`coolify-runbook.md`](coolify-runbook.md).
 
-The cluster is a load-balanced, fault-tolerant AI inference deployment across two GPU inference machines (each with 2× NVIDIA RTX Pro 6000 Blackwell GPUs, 96 GB VRAM per card) and a front-end host with 4× NVIDIA A6000 GPUs that also runs Coolify (student PaaS) and TLJH (JupyterHub). It uses **vLLM** for native FP8 inference and a single **LiteLLM** proxy on the front-end host for cross-engine load balancing and failover, without requiring any network-admin permissions (no VIP, no shared DNS, no L4 load balancer).
+The cluster is a load-balanced, fault-tolerant AI inference deployment across two GPU inference machines (each with 2× NVIDIA RTX Pro 6000 Blackwell GPUs, 96 GB VRAM per card) and a front-end host with 4× NVIDIA A6000 GPUs that runs Coolify (student PaaS) and LiteLLM. It uses **vLLM** for native FP8 inference and a single **LiteLLM** proxy on the front-end host for cross-engine load balancing and failover, without requiring any network-admin permissions (no VIP, no shared DNS, no L4 load balancer). TLJH (JupyterHub) is deployed separately on `castor`, `pollux`, and `vega` for classes that need notebooks — it is NOT on rigel.
 
 Because each GPU card has 96 GB of VRAM, workloads are split:
 
@@ -45,7 +45,6 @@ The one failure mode that's now class-wide is a **front-end host outage**: if ri
         |  |     castor :8010 + pollux :8010|    |
         |  +---------------+---------------+    |
         |  + Coolify (student app deploys, GPUs)|
-        |  + TLJH (JupyterHub via qsynology)    |
         +------------------+--------------------+
                            |
               balanced fan-out to both GPU hosts
