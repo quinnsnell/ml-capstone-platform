@@ -156,8 +156,8 @@ declare -A REQUIRED_COLS=(
   [users]="email name password email_verified_at created_at updated_at"
   [teams]="name description personal_team created_at updated_at"
   [team_user]="team_id user_id role created_at updated_at"
-  [servers]="uuid name description ip port user team_id private_key_id sentinel_updated_at deleted_at created_at updated_at"
-  [server_settings]="server_id is_reachable is_usable is_sentinel_enabled created_at updated_at"
+  [servers]="uuid name description ip port user team_id private_key_id proxy sentinel_updated_at deleted_at created_at updated_at"
+  [server_settings]="server_id is_reachable is_usable is_sentinel_enabled sentinel_token created_at updated_at"
 )
 
 schema_ok=1
@@ -204,6 +204,21 @@ if [[ -z "$PLACEHOLDER_HASH" ]]; then
     echo "ERROR: could not generate bcrypt hash via the 'coolify' container." >&2
     echo "Is the coolify container running? Try: docker ps | grep '^coolify'" >&2
     echo "Aborting — refusing to insert rows without a valid password hash." >&2
+    exit 3
+fi
+
+# ---- Generate a Laravel-encrypted placeholder for server_settings.sentinel_token
+# server_settings.sentinel_token has a Laravel 'encrypted' cast — plaintext or NULL
+# both cause the server-show page to 500. Plaintext throws DecryptException at
+# model load (fails cipher validation); NULL causes TypeError on the non-nullable
+# public string $sentinelToken assignment in App\Livewire\Server\Show::syncData().
+# handleError swallows both silently, mount bails, view crashes on unset Collection.
+# So: encrypt a real placeholder via Laravel's own Crypt facade, keyed by APP_KEY.
+ENC_SENTINEL_TOKEN=$(docker exec coolify php artisan tinker --execute="echo \Illuminate\Support\Facades\Crypt::encryptString('placeholder-not-used-by-team-server');" 2>/dev/null | tr -d '[:space:]')
+if [[ -z "$ENC_SENTINEL_TOKEN" || ${#ENC_SENTINEL_TOKEN} -lt 100 ]]; then
+    echo "ERROR: could not generate encrypted sentinel_token via 'coolify' container." >&2
+    echo "  Expected a >=100-char Laravel Crypt payload; got: '${ENC_SENTINEL_TOKEN:0:60}...'" >&2
+    echo "Aborting — refusing to insert rows without a valid encrypted placeholder." >&2
     exit 3
 fi
 
@@ -349,18 +364,28 @@ FROM teams t, users u
 WHERE t.name = '$e_team_name' AND u.email = '$e_email'
 ON CONFLICT (team_id, user_id) DO NOTHING;
 
--- Server 'ml-capstone' for team $team_name — abstracted from physical host so we can move it later (idempotent on team_id + name; ignores soft-deletes)
-INSERT INTO servers (uuid, name, description, ip, port, "user", team_id, private_key_id, sentinel_updated_at, created_at, updated_at)
-SELECT '$server_uuid', 'ml-capstone', 'Provisioned by provision-teams.sh for $e_team_name', 'host.docker.internal', 22, 'root', t.id, 0, NOW(), NOW(), NOW()
+-- Server 'ml-capstone' for team $team_name — abstracted from physical host so
+-- we can move it later. Idempotent on team_id + name; ignores soft-deletes.
+-- proxy '{"type":"NONE"}' declares 'no proxy managed by this server row' —
+-- team servers all share the Root Team's Traefik (coolify-proxy container), so
+-- there IS no per-team proxy to manage. Without this the server-show page 500s
+-- because Coolify's view calls methods on a null proxy config object.
+INSERT INTO servers (uuid, name, description, ip, port, "user", team_id, private_key_id, proxy, sentinel_updated_at, created_at, updated_at)
+SELECT '$server_uuid', 'ml-capstone', 'Provisioned by provision-teams.sh for $e_team_name', 'host.docker.internal', 22, 'root', t.id, 0, '{"type":"NONE"}'::json, NOW(), NOW(), NOW()
 FROM teams t
 WHERE t.name = '$e_team_name'
   AND NOT EXISTS (SELECT 1 FROM servers s WHERE s.team_id = t.id AND s.name = 'ml-capstone' AND s.deleted_at IS NULL);
 
--- server_settings row for the server we just may have inserted. Coolify's dashboard
--- reads server.settings.is_reachable and 500s if the settings row is missing.
--- Sentinel disabled to avoid needing an encrypted token per server.
-INSERT INTO server_settings (server_id, is_reachable, is_usable, is_sentinel_enabled, created_at, updated_at)
-SELECT s.id, true, true, false, NOW(), NOW()
+-- server_settings row for the server we just may have inserted. Multiple things
+-- must be right here or the server-show page 500s in creative ways:
+--   * is_reachable/is_usable: dashboard reads these; NULL causes 500.
+--   * sentinel_token: Laravel 'encrypted' cast. NULL crashes syncData's
+--     assignment to public string \$sentinelToken (TypeError). Plaintext
+--     crashes model load (DecryptException). Only VALID Laravel Crypt
+--     ciphertext works — we generated one via docker exec above.
+--   * is_sentinel_enabled=false: we're not running per-team sentinel agents.
+INSERT INTO server_settings (server_id, is_reachable, is_usable, is_sentinel_enabled, sentinel_token, created_at, updated_at)
+SELECT s.id, true, true, false, '$ENC_SENTINEL_TOKEN', NOW(), NOW()
 FROM servers s
 JOIN teams t ON t.id = s.team_id
 WHERE t.name = '$e_team_name'
