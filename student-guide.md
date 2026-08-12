@@ -441,12 +441,29 @@ Then on the General page:
 - **Domain**: `https://<team-slug>-staging.ml-capstone.cs.byu.edu`
 - **Save** (don't deploy yet).
 
-### 7. Turn OFF auto-deploy on both Applications
+### 7. Turn OFF auto-deploy + configure GPU (Advanced tab)
 
-Coolify's default is "deploy on every push to the tracked branch." We don't want that — GitHub Actions runs your unit tests first, and only fires a deploy if they pass. So:
+Both toggles live in the same place. In each Application (do this for BOTH staging and production):
 
-- In each Application → **Configuration → Git Source** → **Auto Deploy** → toggle **OFF**.
-- Repeat for the other Application.
+**Advanced tab → Deployment section:**
+
+- **Auto Deploy** → toggle **OFF**
+
+Coolify's default is "deploy on every push to the tracked branch." We don't want that — GitHub Actions runs your unit tests first, and only fires the Coolify deploy webhook if tests pass. Leaving Auto Deploy ON means every push deploys immediately without test-gating.
+
+**Advanced tab → GPU section (optional, ML apps only):**
+
+`hello-world-app` doesn't need a GPU — leave this section alone if you're just proving the pipeline works. Enable it when you deploy an app that uses ML models (sentiment-test-app, your own PyTorch/TF workload, etc.).
+
+When you DO need GPU:
+
+- **Enable GPU** → toggle **ON**
+- **GPU Driver** → `nvidia`
+- **GPU Count** → `1` (each container gets one A6000)
+- **GPU Device Ids** → your instructor may have assigned your team a specific GPU (e.g., `0`, `1`, `2`, or `3`) to spread load across the 4× A6000s on rigel. Set that here. If unset, Docker picks any available GPU.
+- **GPU Options** → leave blank
+
+Save. Repeat for the other Application.
 
 ### 8. Grab the Deploy Webhook URLs
 
