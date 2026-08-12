@@ -567,7 +567,7 @@ Open `greetings.py` in your editor (`code greetings.py`, `vim greetings.py`, etc
 2. **Find the Spanish greeting** in the `GREETINGS` dict and update it:
    ```python
    "es": "Hola, mundo",                    # change this
-   "es": "¡Hola desde v0.1.2!",            # to this
+   "es": "¡Buenos días, mundo!",            # to this
    ```
 
 Save the file. Verify your diff shows exactly two changes:
@@ -591,7 +591,7 @@ Open `https://github.com/byu-ml-capstone/<your-repo>/actions` in a browser. New 
 - **`test` job** runs → **fails** with an AssertionError:
   ```
   test_hello_spanish
-  AssertionError: assert {'hello': '¡Hola desde v0.1.2!'} == {'hello': 'Hola, mundo'}
+  AssertionError: assert {'hello': '¡Buenos días, mundo!'} == {'hello': 'Hola, mundo'}
   ```
 - **`deploy-staging` job** never runs — because the test failed, GitHub Actions skips it. Your staging URL still returns `0.1.1`.
 
@@ -611,7 +611,7 @@ def test_hello_spanish():
     r = client.get("/", params={"lang": "es"})
     assert r.status_code == 200
     assert r.json() == {"hello": "Hola, mundo"}       # change this
-    assert r.json() == {"hello": "¡Hola desde v0.1.2!"}  # to this
+    assert r.json() == {"hello": "¡Buenos días, mundo!"}  # to this
 ```
 
 Save. Verify locally:
@@ -651,7 +651,7 @@ curl -s http://<team-slug>.ml-capstone.cs.byu.edu/health && echo
 Expected:
 ```
 {"ok":true,"version":"0.1.2"}
-{"hello":"¡Hola desde v0.1.2!"}
+{"hello":"¡Buenos días, mundo!"}
 {"ok":true,"version":"0.1.1"}
 ```
 
