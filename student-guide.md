@@ -399,16 +399,15 @@ Coolify's Application-create flow now walks you through four screens:
 
 **Screen 2 — Select a source.** Pick **`byu-ml-capstone-coolify`**. Coolify contacts GitHub and pulls the list of repos the App can see under the org.
 
-**Screen 3 — Select repository.** Pick your class repo (e.g., `byu-ml-capstone/ml-capstone-<yourname>`). Click **Load Repository** to fetch its branches and Dockerfile.
+**Screen 3 — Select repository.** Pick your class repo (e.g., `byu-ml-capstone/ml-capstone-<yourname>`). Click **Load Repository** to fetch its branches.
 
-**Screen 4 — Configuration.** Fill in:
+**Screen 4 — Configuration.** Only 2 fields to set:
 
 - **Branch**: `main`
-- **Build Pack**: `Dockerfile`
-- **Base Directory**: leave blank (Dockerfile is at repo root)
-- **Port**: `8000` (matches the `EXPOSE 8000` in the template's Dockerfile — change this later if your app uses a different port)
-- **Is it a static site?**: No
+- **Build Pack**: **Docker Compose** — the template ships with a `docker-compose.yaml` at the repo root. Coolify parses it for port (`8000`), healthcheck, restart policy, and networking. This means you do NOT have to enter Port, Base Directory, or "Is it a static site?" — Coolify infers them from the compose file.
 - Click **Continue** — lands you on the Application's General page.
+
+> **Why Docker Compose instead of Dockerfile?** Both work, but Docker Compose keeps runtime config in your repo (version-controlled) instead of the Coolify UI (buried in someone's browser). One place to change port/healthcheck when your app grows. Also matches the pattern real deployment tools like Kubernetes, ECS, and Fly use — infrastructure as code.
 
 On the General page:
 
@@ -419,13 +418,10 @@ On the General page:
 
 ### 6. Create your staging Application
 
-Navigate up to the project (breadcrumb at top) → click into the **staging** Environment → **+ Add Resource → Private Repository (with GitHub App)**. Same 4-screen flow as production. On Screen 4 fill in:
+Navigate up to the project (breadcrumb at top) → click into the **staging** Environment → **+ Add Resource → Private Repository (with GitHub App)**. Same 4-screen flow as production. On Screen 4:
 
 - **Branch**: `staging` — the branch dropdown should include this option if you ticked "Include all branches" during Step 4's template flow. If it doesn't, you missed the checkbox; see the callout below.
-- **Build Pack**: `Dockerfile`
-- **Base Directory**: leave blank
-- **Port**: `8000` — same as production. Coolify does NOT copy this from your production Application; every Application defaults to port 3000. Overriding to 8000 is easy to forget and the deploy will look healthy but the domain returns "Bad Gateway".
-- **Is it a static site?**: No
+- **Build Pack**: **Docker Compose** (same as production).
 
 > **If the `staging` branch dropdown is missing:** you skipped "Include all branches" when creating your repo. Recover on your laptop:
 >
