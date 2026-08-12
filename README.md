@@ -54,7 +54,8 @@ ml-capstone-platform/
 │   ├── verify-qwen-host.sh        Health check on a GPU host post-install
 │   ├── smoke-test-cluster.sh      End-to-end smoke test (run from your laptop over VPN)
 │   ├── provision-teams.sh         Bulk-create Coolify teams+users+servers from roster CSV (runs on rigel)
-│   └── invite-to-org.sh           Invite roster users to the byu-ml-capstone GitHub org (runs on laptop)
+│   ├── invite-to-org.sh           Invite roster users to the byu-ml-capstone GitHub org (runs on laptop)
+│   └── provision-gh-teams.sh      Create GitHub Teams mirroring Coolify teams + add members (runs on laptop)
 ├── sentiment-test-app/    Reference app: LLM + local HF, base+app Docker split, integration tests
 ├── tickets/
 │   ├── active-*.md        Open coordination tickets with CS IT

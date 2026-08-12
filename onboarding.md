@@ -188,7 +188,21 @@ Idempotent — users who are already members or have a pending invite are skippe
 
 **Order of operations at term start:**
 1. `./scripts/invite-to-org.sh --apply` (send org invitations from laptop)
-2. `sudo ./scripts/provision-teams.sh --apply` (create Coolify teams+servers on rigel)
-3. Students accept the org invite + sign in to Coolify → land in their pre-provisioned team → create their repo from the `hello-world-app` template inside the org.
+2. Students accept the org invite (they can't be added to GitHub Teams until they're org members)
+3. `./scripts/provision-gh-teams.sh --apply` (create GitHub Teams mirroring the roster, from laptop)
+4. `sudo ./scripts/provision-teams.sh --apply` (create Coolify teams+servers on rigel)
+5. Students sign in to Coolify → land in their pre-provisioned team → create their repo from the `hello-world-app` template inside the org.
 
-Steps 1 and 2 can happen in any order — they don't depend on each other. But students can't complete their setup until BOTH have run.
+Steps 1, 3, and 4 can all be re-run whenever the roster changes — all three scripts are idempotent. Step 3 depends on Step 2 completion (GitHub won't add non-members to a Team). Steps 1, 3, and 4 don't depend on each other otherwise.
+
+## Grant a GitHub Team access to a group's repo
+
+After a group creates their group repo (e.g., `byu-ml-capstone/group-1-sentiment`), grant the matching GitHub Team Write access so every group member can push:
+
+```bash
+gh api -X PUT /orgs/byu-ml-capstone/teams/group-1/repos/byu-ml-capstone/group-1-sentiment -f permission=push
+```
+
+Team slugs are derived from the Coolify team name (lowercased + dash-separated). "Group 1" → `group-1`, "Alice's Sandbox" → `alice-s-sandbox`, etc. See slugify function in `scripts/provision-gh-teams.sh` for the exact rule.
+
+This step could be automated in a future script iteration (e.g., a `grant-team-to-repos.sh` that scans repos matching `<team-slug>-*` and grants team access), but manually granting one team → one repo is trivial via `gh` CLI and only happens once per group.
