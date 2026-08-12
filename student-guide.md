@@ -412,7 +412,9 @@ Coolify's Application-create flow now walks you through four screens:
 
 On the General page:
 
-- **Domain**: replace the auto-generated random subdomain with your team's prod domain. Format: `https://<team-slug>.ml-capstone.cs.byu.edu` — your instructor will tell you the slug. Example: Group 3 → `https://group-3.ml-capstone.cs.byu.edu`.
+- **Domain**: replace the auto-generated random subdomain with your team's prod domain. Format: `http://<team-slug>.ml-capstone.cs.byu.edu` — your instructor will tell you the slug. Example: Group 3 → `http://group-3.ml-capstone.cs.byu.edu`.
+
+> **Why HTTP not HTTPS?** The CS wildcard cert covers `*.cs.byu.edu` (one level only), so it doesn't cover the two-level `<team-slug>.ml-capstone.cs.byu.edu` your app lives at. Rather than have every student's browser scream "Not Secure," student apps serve over plain HTTP. Traffic is already encrypted at the VPN layer, so this is safe. A future upgrade to a two-level wildcard cert would make HTTPS work naturally.
 - **Save** — do NOT click Deploy yet. Auto-deploy needs turning off (Step 7) before your first deploy fires.
 
 ### 6. Create your staging Application
@@ -438,7 +440,7 @@ Navigate up to the project (breadcrumb at top) → click into the **staging** En
 
 Then on the General page:
 
-- **Domain**: `https://<team-slug>-staging.ml-capstone.cs.byu.edu`
+- **Domain**: `http://<team-slug>-staging.ml-capstone.cs.byu.edu`
 - **Save** (don't deploy yet).
 
 ### 7. Turn OFF auto-deploy + configure GPU (Advanced tab)
@@ -520,7 +522,7 @@ git checkout -b staging
 git push -u origin staging
 ```
 
-That first push to `staging` triggers GitHub Actions → the `test` job runs pytest → then `deploy-staging` fires the Coolify staging webhook. Watch the Actions tab on your repo. In ~30–60 seconds, visit `https://<team-slug>-staging.ml-capstone.cs.byu.edu/health` — you should get `{"ok": true, "version": "0.1.1"}`.
+That first push to `staging` triggers GitHub Actions → the `test` job runs pytest → then `deploy-staging` fires the Coolify staging webhook. Watch the Actions tab on your repo. In ~30–60 seconds, visit `http://<team-slug>-staging.ml-capstone.cs.byu.edu/health` — you should get `{"ok": true, "version": "0.1.1"}`.
 
 Then merge staging back into main to trigger the production deploy:
 
@@ -530,7 +532,7 @@ git merge staging
 git push
 ```
 
-Actions runs again → `deploy-prod` fires → `https://<team-slug>.ml-capstone.cs.byu.edu/health` returns the same JSON.
+Actions runs again → `deploy-prod` fires → `http://<team-slug>.ml-capstone.cs.byu.edu/health` returns the same JSON.
 
 If both URLs respond, your Coolify setup is done. Everything after this is code.
 
