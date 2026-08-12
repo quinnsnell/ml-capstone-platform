@@ -340,7 +340,10 @@ Team
 ```
 
 - Sidebar → **Projects → + New Project**. Name it after your app (e.g., `sentiment-app`).
-- The project starts with a default `production` Environment. Click **+ New Environment** → name it `staging`.
+- Coolify auto-drops you into the default `production` Environment after project creation — you'll see the *environment* page, not the project overview. That's expected, but the **+ New Environment** button lives on the *project* page one level up, not here.
+- **Click the project name in the breadcrumb at the top** (e.g., `sentiment-app`) to go back up to the project overview.
+- From the project overview → **+ New Environment** → name it `staging`.
+- You should now see both `production` and `staging` listed on the project page.
 
 ### 4. Install the GitHub App on your repo
 
