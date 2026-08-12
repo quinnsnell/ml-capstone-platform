@@ -9,6 +9,18 @@
 # so this script writes directly to Coolify's Postgres. See
 # `memory/coolify_oauth_setup.md` for the rationale.
 #
+# Because direct DB writes are brittle across Coolify versions, every invocation
+# runs three phases:
+#   1. PREFLIGHT — verify Coolify version + every column we INSERT into exists
+#      with the expected name. If Coolify has renamed/removed a column in an
+#      upgrade, we abort loudly rather than emitting a broken INSERT.
+#   2. PLAN — per-row and rollup summary showing what will happen for each of
+#      the 5 tables (users / teams / team_user / servers / server_settings):
+#      CREATE (row is new) or EXISTS (idempotent no-op). Shown in dry-run and
+#      before --apply so you can sanity-check.
+#   3. APPLY (only with --apply) — execute the SQL, then VERIFY by re-querying
+#      to confirm every row's expected end state is present.
+#
 # Design:
 #   - Fully idempotent (safe to re-run mid-term as CSV grows)
 #   - Dry-run by default; --apply to execute
@@ -37,6 +49,7 @@
 #   ./provision-teams.sh --apply                # execute for real
 #   ./provision-teams.sh --roster path.csv      # explicit roster file
 #   ./provision-teams.sh --check-schema         # dump users/teams/team_user schema, exit
+#   ./provision-teams.sh --show-sql             # also print the raw SQL (default: plan only)
 #   ./provision-teams.sh -h                     # this help
 # =============================================================================
 
@@ -49,7 +62,12 @@ set -u
 
 APPLY=0
 CHECK_SCHEMA=0
+SHOW_SQL=0
 ROSTER=""
+
+# Coolify versions this script has been proven against. New minors are likely
+# fine but flag them so the operator can decide.
+KNOWN_GOOD_MAJOR_MINOR="4.2"
 
 # ---- Argument parsing ---------------------------------------------------
 usage() {
@@ -62,6 +80,7 @@ while [[ $# -gt 0 ]]; do
         --apply)         APPLY=1; shift ;;
         --roster)        ROSTER="$2"; shift 2 ;;
         --check-schema)  CHECK_SCHEMA=1; shift ;;
+        --show-sql)      SHOW_SQL=1; shift ;;
         -h|--help)       usage ;;
         *) echo "Unknown option: $1" >&2; echo "Run with --help." >&2; exit 2 ;;
     esac
@@ -100,13 +119,69 @@ if ! docker exec "$COOLIFY_DB_CONTAINER" pg_isready -U "$COOLIFY_DB_USER" -d "$C
     exit 3
 fi
 
-for tbl in users teams team_user; do
+# ---- Preflight: Coolify version + schema fingerprint --------------------
+echo
+echo "============================ PREFLIGHT ============================"
+
+# Detect Coolify version from the image tag on the running container.
+COOLIFY_IMAGE=$(docker inspect coolify --format '{{.Config.Image}}' 2>/dev/null || echo "")
+COOLIFY_VERSION="${COOLIFY_IMAGE##*:}"
+if [[ -z "$COOLIFY_VERSION" ]]; then
+    COOLIFY_VERSION="unknown"
+fi
+
+version_status="untested"
+case "$COOLIFY_VERSION" in
+    ${KNOWN_GOOD_MAJOR_MINOR}.*) version_status="known-good" ;;
+    latest)                       version_status="floating tag — verify the running version elsewhere" ;;
+esac
+printf '  Coolify version:  %s (%s; script proven against %s.x)\n' \
+    "$COOLIFY_VERSION" "$version_status" "$KNOWN_GOOD_MAJOR_MINOR"
+
+# Check every table + every column we're about to INSERT into. If Coolify
+# renames or removes any of these on upgrade, abort loudly here rather than
+# emitting a broken SQL batch that partially applies.
+declare -A REQUIRED_COLS=(
+  [users]="email name password email_verified_at created_at updated_at"
+  [teams]="name description personal_team created_at updated_at"
+  [team_user]="team_id user_id role created_at updated_at"
+  [servers]="uuid name description ip port user team_id private_key_id sentinel_updated_at deleted_at created_at updated_at"
+  [server_settings]="server_id is_reachable is_usable is_sentinel_enabled created_at updated_at"
+)
+
+schema_ok=1
+for tbl in users teams team_user servers server_settings; do
     if ! psql_ro -c "SELECT 1 FROM $tbl LIMIT 1" >/dev/null 2>&1; then
-        echo "Table '$tbl' not found or unreadable — Coolify schema mismatch?" >&2
-        echo "Run with --check-schema to inspect." >&2
-        exit 3
+        printf '  Schema:           MISSING table %s\n' "$tbl"
+        schema_ok=0
+        continue
+    fi
+    missing_cols=""
+    for col in ${REQUIRED_COLS[$tbl]}; do
+        # Quote `user` since it's a reserved word in postgres
+        if [[ "$col" == "user" ]]; then col_q='"user"'; else col_q="$col"; fi
+        if ! psql_ro -c "SELECT $col_q FROM $tbl LIMIT 0" >/dev/null 2>&1; then
+            missing_cols+=" $col"
+        fi
+    done
+    if [[ -n "$missing_cols" ]]; then
+        printf '  Schema:           %s missing columns:%s\n' "$tbl" "$missing_cols"
+        schema_ok=0
     fi
 done
+
+if (( schema_ok )); then
+    printf '  Schema:           OK — all required columns present across 5 tables\n'
+else
+    echo
+    echo "ERROR: Coolify schema does not match what this script expects." >&2
+    echo "Likely cause: Coolify was upgraded and renamed/removed columns. Run" >&2
+    echo "with --check-schema to inspect the current layout, then update this" >&2
+    echo "script's REQUIRED_COLS map + INSERTs to match." >&2
+    exit 3
+fi
+
+echo "==================================================================="
 
 # ---- Generate a placeholder bcrypt hash (via PHP in the coolify container)
 # Users we create authenticate via OAuth; the password column exists in Laravel's
@@ -134,13 +209,34 @@ for required in team_name email name; do
     fi
 done
 
-# ---- Build SQL ----------------------------------------------------------
-# One transactional batch. Emits three sections per row:
-#   (a) upsert user by lowercased email
-#   (b) upsert team by name
-#   (c) upsert team_user pivot (team_id, user_id, role='admin')
+# ---- Load existing state so we can compute a per-row plan ---------------
+# Newline-delimited lists of keys currently in the DB. Grep-based lookups
+# below avoid a docker exec per row (30 rows would be 30 * 5 = 150 exec calls).
+EXISTING_EMAILS=$(psql_ro -c "SELECT email FROM users;")
+EXISTING_TEAMS=$(psql_ro -c "SELECT name FROM teams;")
+# Encode team+user pivot as "team_name<TAB>email"
+EXISTING_PIVOTS=$(psql_ro -c "SELECT t.name || E'\t' || u.email FROM team_user tu JOIN teams t ON t.id = tu.team_id JOIN users u ON u.id = tu.user_id;")
+EXISTING_MLCAP_SERVER_TEAMS=$(psql_ro -c "SELECT t.name FROM servers s JOIN teams t ON t.id = s.team_id WHERE s.name = 'ml-capstone' AND s.deleted_at IS NULL;")
+EXISTING_SERVER_SETTINGS_TEAMS=$(psql_ro -c "SELECT t.name FROM server_settings ss JOIN servers s ON s.id = ss.server_id JOIN teams t ON t.id = s.team_id WHERE s.name = 'ml-capstone' AND s.deleted_at IS NULL;")
+
+# ---- Build SQL + plan in one pass ---------------------------------------
+# One transactional batch. Emits five sections per row (user / team / pivot /
+# server / server_settings), each guarded by NOT EXISTS or ON CONFLICT so
+# re-runs are no-ops.
 SQL_FILE=$(mktemp -t provision-teams.XXXXXX.sql)
-trap 'rm -f "$SQL_FILE"' EXIT
+PLAN_FILE=$(mktemp -t provision-teams.XXXXXX.plan)
+trap 'rm -f "$SQL_FILE" "$PLAN_FILE"' EXIT
+
+# Plan counters. Bumped as we iterate.
+plan_new_users=0;     plan_exist_users=0
+plan_new_teams=0;     plan_exist_teams=0
+plan_new_pivots=0;    plan_exist_pivots=0
+plan_new_servers=0;   plan_exist_servers=0
+plan_new_settings=0;  plan_exist_settings=0
+plan_data_rows=0  # non-blank, non-comment rows
+
+# Helper: fixed-string exact-line grep against a $'\n'-separated list
+has_line() { grep -qxF -- "$2" <<<"$1"; }
 
 {
     echo "BEGIN;"
@@ -176,6 +272,45 @@ trap 'rm -f "$SQL_FILE"' EXIT
             echo "Fix the CSV and re-run." >&2
             exit 4
         fi
+
+        plan_data_rows=$((plan_data_rows + 1))
+
+        # Compute per-row plan by checking existing state loaded above.
+        # NOTE: this reflects DB state at script start. If two rows in the CSV
+        # target the same NEW team, the second row will still show 'CREATE'
+        # in the plan even though the SQL guards it with NOT EXISTS. That's
+        # a display quirk, not a correctness issue.
+        if has_line "$EXISTING_EMAILS" "$email"; then
+            row_user="EXISTS"; plan_exist_users=$((plan_exist_users + 1))
+        else
+            row_user="CREATE"; plan_new_users=$((plan_new_users + 1))
+        fi
+        if has_line "$EXISTING_TEAMS" "$team_name"; then
+            row_team="EXISTS"; plan_exist_teams=$((plan_exist_teams + 1))
+        else
+            row_team="CREATE"; plan_new_teams=$((plan_new_teams + 1))
+        fi
+        if has_line "$EXISTING_PIVOTS" "${team_name}"$'\t'"${email}"; then
+            row_pivot="EXISTS"; plan_exist_pivots=$((plan_exist_pivots + 1))
+        else
+            row_pivot="CREATE"; plan_new_pivots=$((plan_new_pivots + 1))
+        fi
+        if has_line "$EXISTING_MLCAP_SERVER_TEAMS" "$team_name"; then
+            row_server="EXISTS"; plan_exist_servers=$((plan_exist_servers + 1))
+        else
+            row_server="CREATE"; plan_new_servers=$((plan_new_servers + 1))
+        fi
+        if has_line "$EXISTING_SERVER_SETTINGS_TEAMS" "$team_name"; then
+            row_settings="EXISTS"; plan_exist_settings=$((plan_exist_settings + 1))
+        else
+            row_settings="CREATE"; plan_new_settings=$((plan_new_settings + 1))
+        fi
+
+        # Write plan line to file; will print all at once later.
+        printf '  Row %-3d %-40s %-30s  users:%s  teams:%s  pivot:%s  server:%s  settings:%s\n' \
+            "$row_num" "$team_name" "<$email>" \
+            "$row_user" "$row_team" "$row_pivot" "$row_server" "$row_settings" \
+            >>"$PLAN_FILE"
 
         # SQL escape — double single quotes
         e_email=${email//\'/\'\'}
@@ -228,20 +363,46 @@ SQL
 } >"$SQL_FILE"
 
 echo
-echo "===================================================================="
-echo "Roster:    $ROSTER"
-echo "Rows:      $(( $(wc -l <"$ROSTER") - 1 ))"
-echo "Target:    docker exec $COOLIFY_DB_CONTAINER psql -U $COOLIFY_DB_USER -d $COOLIFY_DB_NAME"
-echo "Mode:      $([[ $APPLY == 1 ]] && echo "APPLY" || echo "dry-run (use --apply to execute)")"
-echo "SQL file:  $SQL_FILE"
-echo "===================================================================="
+echo "============================== PLAN ==============================="
+echo "  Roster:    $ROSTER"
+echo "  Data rows: $plan_data_rows (excluding header + blank/#-commented lines)"
+echo "  Target:    docker exec $COOLIFY_DB_CONTAINER psql -U $COOLIFY_DB_USER -d $COOLIFY_DB_NAME"
+echo "  Mode:      $([[ $APPLY == 1 ]] && echo "APPLY" || echo "dry-run (use --apply to execute)")"
+echo
+echo "  Per-row plan:"
+if [[ -s "$PLAN_FILE" ]]; then
+    cat "$PLAN_FILE"
+else
+    echo "  (no data rows)"
+fi
+echo
+echo "  Rollup:                            CREATE    EXISTS"
+printf '    users                              %5d     %5d\n' "$plan_new_users"    "$plan_exist_users"
+printf '    teams                              %5d     %5d\n' "$plan_new_teams"    "$plan_exist_teams"
+printf '    team_user pivots                   %5d     %5d\n' "$plan_new_pivots"   "$plan_exist_pivots"
+printf '    servers (name=ml-capstone)         %5d     %5d\n' "$plan_new_servers"  "$plan_exist_servers"
+printf '    server_settings                    %5d     %5d\n' "$plan_new_settings" "$plan_exist_settings"
+echo
+total_new=$((plan_new_users + plan_new_teams + plan_new_pivots + plan_new_servers + plan_new_settings))
+if (( total_new == 0 )); then
+    echo "  Effect:    NO-OP (roster is entirely a subset of current DB state)"
+else
+    echo "  Effect:    $total_new new row(s) will be INSERTed."
+fi
+echo "==================================================================="
 echo
 
-if (( ! APPLY )); then
-    echo "--- SQL preview (dry-run) ---"
+if (( SHOW_SQL )); then
+    echo "--- SQL to execute (from $SQL_FILE) ---"
     cat "$SQL_FILE"
-    echo "--- end preview ---"
+    echo "--- end SQL ---"
     echo
+fi
+
+if (( ! APPLY )); then
+    if (( ! SHOW_SQL )); then
+        echo "Full SQL is at $SQL_FILE (pass --show-sql to print it here)."
+    fi
     echo "Re-run with --apply to execute."
     exit 0
 fi
@@ -253,13 +414,50 @@ if ! psql_exec <"$SQL_FILE"; then
     exit 4
 fi
 
+# ---- Verify --------------------------------------------------------------
+# Re-load DB state and confirm every planned CREATE actually materialized.
+# We don't just check counts; we check that the specific keys from the CSV
+# are now in the corresponding tables.
 echo
-echo "--- Post-apply summary ---"
-psql_ro -c "SELECT id, LEFT(name, 40) AS name FROM teams ORDER BY id;"
-echo
-psql_ro -c "SELECT COUNT(*) AS user_rows FROM users;"
-psql_ro -c "SELECT COUNT(*) AS team_user_links FROM team_user;"
-psql_ro -c "SELECT s.id, s.name AS server, t.name AS team FROM servers s JOIN teams t ON t.id = s.team_id WHERE s.deleted_at IS NULL ORDER BY s.id;"
+echo "============================= VERIFY =============================="
+
+AFTER_EMAILS=$(psql_ro -c "SELECT email FROM users;")
+AFTER_TEAMS=$(psql_ro -c "SELECT name FROM teams;")
+AFTER_PIVOTS=$(psql_ro -c "SELECT t.name || E'\t' || u.email FROM team_user tu JOIN teams t ON t.id = tu.team_id JOIN users u ON u.id = tu.user_id;")
+AFTER_MLCAP_SERVERS=$(psql_ro -c "SELECT t.name FROM servers s JOIN teams t ON t.id = s.team_id WHERE s.name = 'ml-capstone' AND s.deleted_at IS NULL;")
+AFTER_SETTINGS=$(psql_ro -c "SELECT t.name FROM server_settings ss JOIN servers s ON s.id = ss.server_id JOIN teams t ON t.id = s.team_id WHERE s.name = 'ml-capstone' AND s.deleted_at IS NULL;")
+
+verify_fails=0
+row_num=1
+while IFS= read -r line || [[ -n "$line" ]]; do
+    row_num=$((row_num + 1))
+    [[ -z "$line" || "$line" =~ ^# ]] && continue
+    line=${line%$'\r'}
+    IFS=',' read -r -a F <<<"$line"
+    team_name=$(echo "${F[${COL_IDX[team_name]}]}" | xargs)
+    email=$(echo "${F[${COL_IDX[email]}]}" | tr '[:upper:]' '[:lower:]' | xargs)
+    [[ -z "$team_name" || -z "$email" ]] && continue
+
+    missing=""
+    has_line "$AFTER_EMAILS"          "$email"                                    || missing+=" users"
+    has_line "$AFTER_TEAMS"           "$team_name"                                || missing+=" teams"
+    has_line "$AFTER_PIVOTS"          "${team_name}"$'\t'"${email}"               || missing+=" pivot"
+    has_line "$AFTER_MLCAP_SERVERS"   "$team_name"                                || missing+=" server"
+    has_line "$AFTER_SETTINGS"        "$team_name"                                || missing+=" settings"
+
+    if [[ -z "$missing" ]]; then
+        printf '  Row %-3d ✓  %-40s <%s>\n' "$row_num" "$team_name" "$email"
+    else
+        printf '  Row %-3d ✗  %-40s <%s>  MISSING:%s\n' "$row_num" "$team_name" "$email" "$missing"
+        verify_fails=$((verify_fails + 1))
+    fi
+done < <(tail -n +2 "$ROSTER")
+
+echo "==================================================================="
+if (( verify_fails > 0 )); then
+    echo "VERIFY FAILED — $verify_fails row(s) missing expected state. Investigate." >&2
+    exit 5
+fi
 echo
 echo "Done. Students with rows in 'users' can now sign in via GitHub OAuth"
 echo "using the email in their row. Coolify will link the account on first login."
