@@ -158,10 +158,11 @@ declare -A REQUIRED_COLS=(
   [team_user]="team_id user_id role created_at updated_at"
   [servers]="uuid name description ip port user team_id private_key_id proxy sentinel_updated_at deleted_at created_at updated_at"
   [server_settings]="server_id is_reachable is_usable is_sentinel_enabled sentinel_token created_at updated_at"
+  [standalone_dockers]="uuid name network server_id created_at updated_at"
 )
 
 schema_ok=1
-for tbl in users teams team_user servers server_settings; do
+for tbl in users teams team_user servers server_settings standalone_dockers; do
     if ! psql_ro -c "SELECT 1 FROM $tbl LIMIT 1" >/dev/null 2>&1; then
         printf '  Schema:           MISSING table %s\n' "$tbl"
         schema_ok=0
@@ -244,21 +245,23 @@ EXISTING_TEAMS=$(psql_ro -c "SELECT name FROM teams;")
 EXISTING_PIVOTS=$(psql_ro -c "SELECT t.name || E'\t' || u.email FROM team_user tu JOIN teams t ON t.id = tu.team_id JOIN users u ON u.id = tu.user_id;")
 EXISTING_MLCAP_SERVER_TEAMS=$(psql_ro -c "SELECT t.name FROM servers s JOIN teams t ON t.id = s.team_id WHERE s.name = 'ml-capstone' AND s.deleted_at IS NULL;")
 EXISTING_SERVER_SETTINGS_TEAMS=$(psql_ro -c "SELECT t.name FROM server_settings ss JOIN servers s ON s.id = ss.server_id JOIN teams t ON t.id = s.team_id WHERE s.name = 'ml-capstone' AND s.deleted_at IS NULL;")
+EXISTING_DESTINATION_TEAMS=$(psql_ro -c "SELECT t.name FROM standalone_dockers sd JOIN servers s ON s.id = sd.server_id JOIN teams t ON t.id = s.team_id WHERE s.name = 'ml-capstone' AND s.deleted_at IS NULL;")
 
 # ---- Build SQL + plan in one pass ---------------------------------------
-# One transactional batch. Emits five sections per row (user / team / pivot /
-# server / server_settings), each guarded by NOT EXISTS or ON CONFLICT so
-# re-runs are no-ops.
+# One transactional batch. Emits six sections per row (user / team / pivot /
+# server / server_settings / standalone_dockers), each guarded by NOT EXISTS
+# or ON CONFLICT so re-runs are no-ops.
 SQL_FILE=$(mktemp -t provision-teams.XXXXXX.sql)
 PLAN_FILE=$(mktemp -t provision-teams.XXXXXX.plan)
 trap 'rm -f "$SQL_FILE" "$PLAN_FILE"' EXIT
 
 # Plan counters. Bumped as we iterate.
-plan_new_users=0;     plan_exist_users=0
-plan_new_teams=0;     plan_exist_teams=0
-plan_new_pivots=0;    plan_exist_pivots=0
-plan_new_servers=0;   plan_exist_servers=0
-plan_new_settings=0;  plan_exist_settings=0
+plan_new_users=0;         plan_exist_users=0
+plan_new_teams=0;         plan_exist_teams=0
+plan_new_pivots=0;        plan_exist_pivots=0
+plan_new_servers=0;       plan_exist_servers=0
+plan_new_settings=0;      plan_exist_settings=0
+plan_new_destinations=0;  plan_exist_destinations=0
 plan_data_rows=0  # non-blank, non-comment rows
 
 # Helper: fixed-string exact-line grep against a $'\n'-separated list
@@ -332,11 +335,16 @@ has_line() { grep -qxF -- "$2" <<<"$1"; }
         else
             row_settings="CREATE"; plan_new_settings=$((plan_new_settings + 1))
         fi
+        if has_line "$EXISTING_DESTINATION_TEAMS" "$team_name"; then
+            row_dest="EXISTS"; plan_exist_destinations=$((plan_exist_destinations + 1))
+        else
+            row_dest="CREATE"; plan_new_destinations=$((plan_new_destinations + 1))
+        fi
 
         # Write plan line to file; will print all at once later.
-        printf '  Row %-3d %-40s %-30s  users:%s  teams:%s  pivot:%s  server:%s  settings:%s\n' \
+        printf '  Row %-3d %-40s %-30s  users:%s  teams:%s  pivot:%s  server:%s  settings:%s  dest:%s\n' \
             "$row_num" "$team_name" "<$email>" \
-            "$row_user" "$row_team" "$row_pivot" "$row_server" "$row_settings" \
+            "$row_user" "$row_team" "$row_pivot" "$row_server" "$row_settings" "$row_dest" \
             >>"$PLAN_FILE"
 
         # SQL escape — double single quotes
@@ -345,8 +353,9 @@ has_line() { grep -qxF -- "$2" <<<"$1"; }
         e_name=${name//\'/\'\'}
         e_gh=${gh//\'/\'\'}
 
-        # Short unique uuid for the server row (Coolify format: 24 lowercase alnum)
+        # Short unique uuids (Coolify format: 24 lowercase alnum). One per new row.
         server_uuid=$(head -c 4096 /dev/urandom | LC_ALL=C tr -dc 'a-z0-9' | head -c 24)
+        dest_uuid=$(head -c 4096 /dev/urandom | LC_ALL=C tr -dc 'a-z0-9' | head -c 24)
 
         cat <<SQL
 -- Row: team=$team_name, user=$email
@@ -393,6 +402,22 @@ WHERE t.name = '$e_team_name'
   AND s.deleted_at IS NULL
   AND NOT EXISTS (SELECT 1 FROM server_settings ss WHERE ss.server_id = s.id);
 
+-- Standalone Docker destination for the team's server. Coolify's + Add Resource
+-- flow requires at least one destination on the target server; without it the
+-- user sees "Select a destination" with no options and cannot create Applications.
+-- We share the 'coolify' network (same as Root Team's default) — all team servers
+-- run on the same physical box, so a separate docker network per team would add
+-- complexity without meaningful isolation. Application-level isolation via
+-- team_id + labels is what actually separates teams' apps.
+INSERT INTO standalone_dockers (uuid, name, network, server_id, created_at, updated_at)
+SELECT '$dest_uuid', 'coolify', 'coolify', s.id, NOW(), NOW()
+FROM servers s
+JOIN teams t ON t.id = s.team_id
+WHERE t.name = '$e_team_name'
+  AND s.name = 'ml-capstone'
+  AND s.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM standalone_dockers sd WHERE sd.server_id = s.id);
+
 SQL
     done < <(tail -n +2 "$ROSTER")
 
@@ -414,13 +439,14 @@ else
 fi
 echo
 echo "  Rollup:                            CREATE    EXISTS"
-printf '    users                              %5d     %5d\n' "$plan_new_users"    "$plan_exist_users"
-printf '    teams                              %5d     %5d\n' "$plan_new_teams"    "$plan_exist_teams"
-printf '    team_user pivots                   %5d     %5d\n' "$plan_new_pivots"   "$plan_exist_pivots"
-printf '    servers (name=ml-capstone)         %5d     %5d\n' "$plan_new_servers"  "$plan_exist_servers"
-printf '    server_settings                    %5d     %5d\n' "$plan_new_settings" "$plan_exist_settings"
+printf '    users                              %5d     %5d\n' "$plan_new_users"        "$plan_exist_users"
+printf '    teams                              %5d     %5d\n' "$plan_new_teams"        "$plan_exist_teams"
+printf '    team_user pivots                   %5d     %5d\n' "$plan_new_pivots"       "$plan_exist_pivots"
+printf '    servers (name=ml-capstone)         %5d     %5d\n' "$plan_new_servers"      "$plan_exist_servers"
+printf '    server_settings                    %5d     %5d\n' "$plan_new_settings"     "$plan_exist_settings"
+printf '    standalone_dockers (destinations)  %5d     %5d\n' "$plan_new_destinations" "$plan_exist_destinations"
 echo
-total_new=$((plan_new_users + plan_new_teams + plan_new_pivots + plan_new_servers + plan_new_settings))
+total_new=$((plan_new_users + plan_new_teams + plan_new_pivots + plan_new_servers + plan_new_settings + plan_new_destinations))
 if (( total_new == 0 )); then
     echo "  Effect:    NO-OP (roster is entirely a subset of current DB state)"
 else
@@ -470,6 +496,7 @@ AFTER_TEAMS=$(psql_ro -c "SELECT name FROM teams;")
 AFTER_PIVOTS=$(psql_ro -c "SELECT t.name || E'\t' || u.email FROM team_user tu JOIN teams t ON t.id = tu.team_id JOIN users u ON u.id = tu.user_id;")
 AFTER_MLCAP_SERVERS=$(psql_ro -c "SELECT t.name FROM servers s JOIN teams t ON t.id = s.team_id WHERE s.name = 'ml-capstone' AND s.deleted_at IS NULL;")
 AFTER_SETTINGS=$(psql_ro -c "SELECT t.name FROM server_settings ss JOIN servers s ON s.id = ss.server_id JOIN teams t ON t.id = s.team_id WHERE s.name = 'ml-capstone' AND s.deleted_at IS NULL;")
+AFTER_DESTINATIONS=$(psql_ro -c "SELECT t.name FROM standalone_dockers sd JOIN servers s ON s.id = sd.server_id JOIN teams t ON t.id = s.team_id WHERE s.name = 'ml-capstone' AND s.deleted_at IS NULL;")
 
 verify_fails=0
 row_num=1
@@ -489,6 +516,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     has_line "$AFTER_PIVOTS"          "${team_name}"$'\t'"${email}"               || missing+=" pivot"
     has_line "$AFTER_MLCAP_SERVERS"   "$team_name"                                || missing+=" server"
     has_line "$AFTER_SETTINGS"        "$team_name"                                || missing+=" settings"
+    has_line "$AFTER_DESTINATIONS"    "$team_name"                                || missing+=" destination"
 
     if [[ -z "$missing" ]]; then
         printf '  Row %-3d ✓  %-40s <%s>\n' "$row_num" "$team_name" "$email"
