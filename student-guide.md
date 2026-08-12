@@ -416,7 +416,9 @@ Edit `docker-compose.yaml` on GitHub (pencil icon → edit-in-browser is fine):
   SERVICE_FQDN_APP: "http://<team-slug>-staging.ml-capstone.cs.byu.edu"
   ```
 
-Replace `REPLACE-WITH-YOUR-TEAM-SLUG` with your actual team slug (the instructor told you). Commit each edit directly to its branch. Once done, both `main` and `staging` should have their correct URLs.
+Replace `EDIT-YOUR-docker-compose-yaml` (the placeholder that ships in the template) with your actual team slug (the instructor told you). Commit each edit directly to its branch. Once done, both `main` and `staging` should have their correct URLs.
+
+> **What happens if you forget to edit?** Coolify creates the Application with the placeholder domain, deploy succeeds, but the app is only reachable at `http://EDIT-YOUR-docker-compose-yaml.ml-capstone.cs.byu.edu` — clearly a placeholder anyone will notice. Your expected URL (`<team-slug>.ml-capstone.cs.byu.edu`) will return 404 until you fix the compose and push again.
 
 **Finding your repo later:** org repos do NOT appear on your personal GitHub profile by default. To find yours:
 - **Bookmark it** — the URL is stable: `github.com/byu-ml-capstone/<your-repo>`
