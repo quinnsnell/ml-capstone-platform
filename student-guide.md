@@ -403,23 +403,6 @@ You'll create your class repo **inside the org**, not under your personal accoun
 
 You now have a fresh repo at `github.com/byu-ml-capstone/<team-slug>-<app>` populated with a minimal FastAPI (`/`, `/health`, `/languages`) and the 3-job CI/CD workflow. The `byu-ml-capstone-coolify` App already has access to it — no install step needed.
 
-**⚠️ One edit before you leave GitHub:** the template's `docker-compose.yaml` has a placeholder domain that Coolify reads at Application-create time. Set it now, on BOTH branches, before creating your Coolify Applications.
-
-Edit `docker-compose.yaml` on GitHub (pencil icon → edit-in-browser is fine):
-
-- **On the `main` branch:**
-  ```yaml
-  SERVICE_FQDN_APP: "http://<team-slug>.ml-capstone.cs.byu.edu"
-  ```
-- **On the `staging` branch:**
-  ```yaml
-  SERVICE_FQDN_APP: "http://<team-slug>-staging.ml-capstone.cs.byu.edu"
-  ```
-
-Replace `EDIT-YOUR-docker-compose-yaml` (the placeholder that ships in the template) with your actual team slug (the instructor told you). Commit each edit directly to its branch. Once done, both `main` and `staging` should have their correct URLs.
-
-> **What happens if you forget to edit?** Coolify creates the Application with the placeholder domain, deploy succeeds, but the app is only reachable at `http://EDIT-YOUR-docker-compose-yaml.ml-capstone.cs.byu.edu` — clearly a placeholder anyone will notice. Your expected URL (`<team-slug>.ml-capstone.cs.byu.edu`) will return 404 until you fix the compose and push again.
-
 **Finding your repo later:** org repos do NOT appear on your personal GitHub profile by default. To find yours:
 - **Bookmark it** — the URL is stable: `github.com/byu-ml-capstone/<your-repo>`
 - **Org page:** https://github.com/byu-ml-capstone lists every repo you have access to
@@ -443,18 +426,19 @@ Coolify's Application-create flow now walks you through four screens:
 
 **Screen 3 — Select repository.** Pick your class repo (e.g., `byu-ml-capstone/<team-slug>-<app>`). Click **Load Repository** to fetch its branches.
 
-**Screen 4 — Configuration.** Only 2 fields to set:
+**Screen 4 — Configuration.** Fill in:
 
 - **Branch**: `main`
-- **Build Pack**: **Docker Compose** — the template ships with a `docker-compose.yaml` at the repo root. Coolify parses it for port (`8000`), healthcheck, restart policy, networking, AND the deploy domain (via `SERVICE_FQDN_APP`, which you set on GitHub above). No fields to enter on this screen after Branch + Build Pack.
+- **Build Pack**: **Dockerfile** — reads the `Dockerfile` at the repo root.
+- **Base Directory**: leave blank
+- **Port**: `8000` — matches the template's `EXPOSE 8000`
+- **Is it a static site?**: No
 - Click **Continue** — lands you on the Application's General page.
-
-> **Why Docker Compose instead of Dockerfile?** Both work, but Docker Compose keeps runtime config in your repo (version-controlled) instead of the Coolify UI (buried in someone's browser). One place to change port/healthcheck when your app grows. Also matches the pattern real deployment tools like Kubernetes, ECS, and Fly use — infrastructure as code.
 
 On the General page:
 
-- The **Domain** field should already be populated with `http://<team-slug>.ml-capstone.cs.byu.edu` — Coolify pulled it from the `SERVICE_FQDN_APP` in your compose file. If it's blank or has an auto-generated `.sslip.io` domain instead, you either forgot to commit the compose edit before creating the Application here, or committed to the wrong branch — recheck GitHub, fix the compose, then delete this Application and recreate.
-- **Do NOT click "Generate Domain"** — that button sometimes triggers a Coolify UI crash. If your domain came in correctly from compose, you don't need it.
+- **Domain**: type your team's prod domain: `http://<team-slug>.ml-capstone.cs.byu.edu` (drop the auto-generated `.sslip.io` value if one appears). Your instructor gave you the slug. Example: Group 3 → `http://group-3.ml-capstone.cs.byu.edu`.
+- **Do NOT click "Generate Domain"** — that button produces a `.sslip.io` URL that can trigger a Coolify UI crash. Just type your domain in the field.
 
 > **Why HTTP not HTTPS?** The CS wildcard cert covers `*.cs.byu.edu` (one level only), so it doesn't cover the two-level `<team-slug>.ml-capstone.cs.byu.edu` your app lives at. Rather than have every student's browser scream "Not Secure," student apps serve over plain HTTP. Traffic is already encrypted at the VPN layer, so this is safe. A future upgrade to a two-level wildcard cert would make HTTPS work naturally.
 - **Save** — do NOT click Deploy yet. Auto-deploy needs turning off (Step 7) before your first deploy fires.
@@ -464,7 +448,10 @@ On the General page:
 Navigate up to the project (breadcrumb at top) → click into the **staging** Environment → **+ Add Resource → Private Repository (with GitHub App)**. Same 4-screen flow as production. On Screen 4:
 
 - **Branch**: `staging` — the branch dropdown should include this option if you ticked "Include all branches" during Step 4's template flow. If it doesn't, you missed the checkbox; see the callout below.
-- **Build Pack**: **Docker Compose** (same as production).
+- **Build Pack**: **Dockerfile** (same as production).
+- **Base Directory**: leave blank
+- **Port**: `8000` — Coolify does NOT copy this from your production Application; every Application defaults to port 3000. Overriding to 8000 is easy to forget and the deploy will look healthy but the domain returns "Bad Gateway".
+- **Is it a static site?**: No
 
 > **If the `staging` branch dropdown is missing:** you skipped "Include all branches" when creating your repo. Recover on your laptop:
 >
@@ -479,7 +466,7 @@ Navigate up to the project (breadcrumb at top) → click into the **staging** En
 
 Then on the General page:
 
-- **Domain**: `http://<team-slug>-staging.ml-capstone.cs.byu.edu`
+- **Domain**: type `http://<team-slug>-staging.ml-capstone.cs.byu.edu` in the field (do NOT click "Generate Domain").
 - **Save** (don't deploy yet).
 
 ### 7. Turn OFF auto-deploy + configure GPU (Advanced tab)
