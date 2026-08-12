@@ -1069,20 +1069,22 @@ Store the two webhook URLs your instructor gave you as **repo secrets**:
 
 ### 5b. Push and watch the pipeline light up
 
+Your repo already has both `main` and `staging` branches (from the template) and the remote is already set (you cloned it in Setup Step 11). Push to `staging` first — you replaced hello-world's code with sentiment code, so this is a big change and staging is where big changes should land first:
+
 ```bash
+git checkout staging
 git add .
-git commit -m "initial sentiment app + CI/CD"
-git branch staging                              # create staging branch tracking main
-git remote add origin https://github.com/<your-username>/sentiment-app.git
-git push -u origin main
-git push origin staging                         # push staging too
+git commit -m "replace hello-world with sentiment classifier"
+git push
 ```
 
-First run on `main` triggers `test` + `deploy-prod`. On subsequent development you'll typically push to `staging` first (see Section 8). Watch:
+Watch:
 
-1. **GitHub Actions tab** → CI/CD workflow runs. Job graph shows `test` → `deploy-prod`.
-2. **Coolify UI** (instructor can share) → sentiment-app prod deploys.
-3. `curl http://Group1.ml-capstone.cs.byu.edu/health` returns your `/health` JSON. (VPN required.)
+1. **GitHub Actions tab** → CI/CD workflow runs. Job graph shows `test` → `deploy-staging`.
+2. **Coolify UI** — your staging Application shows a new deployment.
+3. `curl http://<team-slug>-staging.ml-capstone.cs.byu.edu/health` returns your new `/health` JSON (VPN required).
+
+When staging looks good, promote to prod exactly like the Setup Step 11 walkthrough taught you — PR from `staging` into `main` (or merge locally + push), and `deploy-prod` fires.
 
 ## Section 6: Your testing strategy — the three tiers
 
@@ -1524,7 +1526,8 @@ These bypass LiteLLM, so you must change the *model name* in your client from `c
 | Chat model | `classroom-chat` |
 | Autocomplete model | `classroom-autocomplete` (Continue only) |
 | VPN gateway | `cs-vpn.byu.edu` (GlobalProtect client) |
-| Your staging URL | `Group1-staging.ml-capstone.cs.byu.edu` |
-| Your prod URL | `Group1.ml-capstone.cs.byu.edu` |
-| GitHub Actions secrets you'll set | `COOLIFY_DEPLOY_WEBHOOK_STAGING`, `COOLIFY_DEPLOY_WEBHOOK_PROD` |
+| Your staging URL | `http://<team-slug>-staging.ml-capstone.cs.byu.edu` |
+| Your prod URL | `http://<team-slug>.ml-capstone.cs.byu.edu` |
+| GitHub Actions secrets you'll set | `COOLIFY_DEPLOY_WEBHOOK_STAGING`, `COOLIFY_DEPLOY_WEBHOOK_PROD`, `COOLIFY_API_TOKEN` |
+| Template repo | `github.com/byu-ml-capstone/hello-world-app` (Use this template) |
 | Reference app | `github.com/byu-ml-capstone/sentiment-test-app` |
