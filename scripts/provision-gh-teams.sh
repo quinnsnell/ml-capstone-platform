@@ -176,12 +176,15 @@ for team_name in "${!TEAM_SLUG[@]}"; do
     # Trim + de-duplicate members
     members=$(echo "${TEAM_MEMBERS[$slug]}" | tr ' ' '\n' | sort -u | grep -v '^$')
 
-    # Does the team already exist?
-    team_state=$(gh api "/orgs/$ORG/teams/$slug" --jq .slug 2>/dev/null || echo "")
-    if [[ -n "$team_state" ]]; then
+    # Does the team already exist? Use exit code, not stdout — a 404 body still
+    # produces a JSON payload that jq happily returns "null" for missing keys,
+    # which would false-positive an EXISTS check on stdout content alone.
+    if gh api "/orgs/$ORG/teams/$slug" >/dev/null 2>&1; then
+        team_exists=1
         team_marker="EXISTS "
         teams_existing=$((teams_existing + 1))
     else
+        team_exists=0
         team_marker="CREATE "
         teams_to_create=$((teams_to_create + 1))
     fi
@@ -189,9 +192,9 @@ for team_name in "${!TEAM_SLUG[@]}"; do
 
     while read -r member; do
         [[ -z "$member" ]] && continue
-        # Check membership
+        # Check membership (only if team exists — otherwise skip the query)
         m_state=""
-        if [[ -n "$team_state" ]]; then
+        if (( team_exists )); then
             m_state=$(gh api "/orgs/$ORG/teams/$slug/memberships/$member" --jq .state 2>/dev/null || echo "")
         fi
         case "$m_state" in
@@ -239,11 +242,9 @@ apply_fails=0
 for team_name in "${!TEAM_SLUG[@]}"; do
     slug="${TEAM_SLUG[$team_name]}"
 
-    # Ensure team exists. If it exists under a different slug than our computed one,
-    # GitHub's create API will fail because the *name* is unique per org — surface
-    # that clearly so the operator can rename the Coolify team or manually align.
-    team_state=$(gh api "/orgs/$ORG/teams/$slug" --jq .slug 2>/dev/null || echo "")
-    if [[ -z "$team_state" ]]; then
+    # Ensure team exists. Check via exit code — a 404 body would fool a
+    # jq-based check into thinking it exists.
+    if ! gh api "/orgs/$ORG/teams/$slug" >/dev/null 2>&1; then
         create_err=$(gh api -X POST "/orgs/$ORG/teams" -f name="$team_name" -f description="Provisioned by provision-gh-teams.sh from roster" -f privacy="closed" 2>&1 >/dev/null || true)
         if [[ -n "$create_err" ]]; then
             printf '  FAIL     create team "%s" — %s\n' "$team_name" "$(echo "$create_err" | head -1)"
