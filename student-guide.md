@@ -363,7 +363,14 @@ You'll be redirected back to a GitHub confirmation page. That's expected — Coo
 
 ### 5. Create your production Application
 
-Inside your project → click into the **production** Environment → **+ New → Application → Private Repository (with GitHub App)**.
+Inside your project → click into the **production** Environment → **+ Add Resource**.
+
+You'll see several options. Click **Private Repository (with GitHub App)** — **NOT** the plain "Private Repository" tile above it. Those look identical at a glance but are completely different:
+
+- **Private Repository (with GitHub App)** ← this one — uses the ml-capstone-coolify App you just installed. Correct choice.
+- **Private Repository** ← *not* this — uses SSH deploy keys instead, an entirely different auth flow that won't pair with the App and will silently fail deploys.
+
+Then fill in:
 
 - **Source**: `ml-capstone-coolify`
 - **Repository**: your class repo
