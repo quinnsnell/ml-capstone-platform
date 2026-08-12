@@ -69,6 +69,17 @@ ROSTER=""
 # fine but flag them so the operator can decide.
 KNOWN_GOOD_MAJOR_MINOR="4.2"
 
+# ---- Small helpers ------------------------------------------------------
+# Pure-bash whitespace trim. Handles apostrophes/quotes/anything else literally —
+# DO NOT use xargs for this (it parses shell quoting and blows up on unmatched
+# single quotes like "Quinn's Sandbox").
+trim() {
+    local s="$1"
+    s="${s#"${s%%[![:space:]]*}"}"
+    s="${s%"${s##*[![:space:]]}"}"
+    printf '%s' "$s"
+}
+
 # ---- Argument parsing ---------------------------------------------------
 usage() {
     sed -n '2,/^# ===*$/{ /^# ===*$/d; s/^# \{0,1\}//p; }' "$0"
@@ -259,10 +270,11 @@ has_line() { grep -qxF -- "$2" <<<"$1"; }
         gh=""
         [[ -n "${COL_IDX[github_username]+set}" ]] && gh=${F[${COL_IDX[github_username]}]:-}
 
-        # lowercase email
-        email=$(echo "$email_raw" | tr '[:upper:]' '[:lower:]' | xargs)
-        team_name=$(echo "$team_name" | xargs)
-        name=$(echo "$name" | xargs)
+        # Trim + lowercase (bash-native; xargs would choke on apostrophes).
+        email=$(trim "$email_raw")
+        email=${email,,}
+        team_name=$(trim "$team_name")
+        name=$(trim "$name")
 
         # Reject rows with empty required fields — silent inserts of '' would be
         # very hard to debug later, and the users.email unique constraint would
@@ -400,9 +412,16 @@ if (( SHOW_SQL )); then
 fi
 
 if (( ! APPLY )); then
-    if (( ! SHOW_SQL )); then
-        echo "Full SQL is at $SQL_FILE (pass --show-sql to print it here)."
+    echo "READY: preflight passed, plan generated, no changes made to the database."
+    if (( total_new == 0 )); then
+        echo "        Roster is already fully represented — running --apply would be a no-op."
+    else
+        echo "        Running --apply will INSERT $total_new row(s) in one transaction."
     fi
+    if (( ! SHOW_SQL )); then
+        echo "        Full SQL is at $SQL_FILE (pass --show-sql to print it here)."
+    fi
+    echo
     echo "Re-run with --apply to execute."
     exit 0
 fi
@@ -434,8 +453,9 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" || "$line" =~ ^# ]] && continue
     line=${line%$'\r'}
     IFS=',' read -r -a F <<<"$line"
-    team_name=$(echo "${F[${COL_IDX[team_name]}]}" | xargs)
-    email=$(echo "${F[${COL_IDX[email]}]}" | tr '[:upper:]' '[:lower:]' | xargs)
+    team_name=$(trim "${F[${COL_IDX[team_name]}]}")
+    email=$(trim "${F[${COL_IDX[email]}]}")
+    email=${email,,}
     [[ -z "$team_name" || -z "$email" ]] && continue
 
     missing=""
@@ -459,5 +479,6 @@ if (( verify_fails > 0 )); then
     exit 5
 fi
 echo
-echo "Done. Students with rows in 'users' can now sign in via GitHub OAuth"
-echo "using the email in their row. Coolify will link the account on first login."
+echo "SUCCESS: $plan_data_rows row(s) processed, $total_new new DB row(s) inserted, all verified."
+echo "Students with rows in 'users' can now sign in via GitHub OAuth using the email"
+echo "in their row. Coolify will link the account on first login."
