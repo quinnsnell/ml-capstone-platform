@@ -71,7 +71,7 @@ No tensor parallelism — each model owns its GPU. This removes the per-layer al
 
 ## 2. Server Setup — GPU Hosts (castor and pollux)
 
-The GPU hosts run only vLLM. The LiteLLM proxy lives on the front-end host and is documented separately in `Coolify_Deployment_Runbook.md` §5.
+The GPU hosts run only vLLM. The LiteLLM proxy lives on the front-end host and is documented separately in [`coolify-runbook.md`](coolify-runbook.md) §5.
 
 ### Prerequisites
 
@@ -116,7 +116,7 @@ You can also pass any Hugging Face repo id directly with `--chat-model` / `--fim
 
 ### Install
 
-The GPU-host install is handled by `install-qwen-cluster.sh`. It installs vLLM under `/opt/qwen-cluster`, pre-downloads the chosen models, writes two systemd units, and enables them as daemons that autostart on boot. The script is idempotent — re-running it (including with a different `--profile`) is safe and is the intended way to swap the running model. The front-end LiteLLM proxy lives on rigel and is documented in `Coolify_Deployment_Runbook.md` §5; the GPU hosts run only vLLM.
+The GPU-host install is handled by `install-qwen-cluster.sh`. It installs vLLM under `/opt/qwen-cluster`, pre-downloads the chosen models, writes two systemd units, and enables them as daemons that autostart on boot. The script is idempotent — re-running it (including with a different `--profile`) is safe and is the intended way to swap the running model. The front-end LiteLLM proxy lives on rigel and is documented in [`coolify-runbook.md`](coolify-runbook.md) §5; the GPU hosts run only vLLM.
 
 The installer auto-detects the two largest GPUs by VRAM and pins each vLLM engine to one by GPU UUID (via `CUDA_DEVICE_ORDER=PCI_BUS_ID` + `CUDA_VISIBLE_DEVICES=<uuid>`). Chat lands on the biggest card, FIM on the second — so castor's heterogeneous Blackwell + RTX 4090 layout and pollux's homogeneous 2× Blackwell layout both work with the same command. FIM's `--max-model-len` also auto-scales to the FIM card's VRAM (8k at <30 GB, 16k at <50 GB, 32k otherwise) so a small card doesn't OOM at KV-cache-hungry defaults.
 

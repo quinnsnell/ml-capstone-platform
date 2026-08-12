@@ -128,7 +128,7 @@ HAProxy's SNI passthrough rule is misconfigured. See [`tickets/archive/2026-08-0
 
 ### Wildcard TLS cert expired
 
-The `*.cs.byu.edu` DigiCert cert is valid Jul 9 2026 → Jan 23 2027. Renewal steps in [`coolify-runbook.md`](coolify-runbook.md) §14.
+The `*.cs.byu.edu` DigiCert cert is valid Jul 9 2026 → Jan 23 2027. Renewal is via CS IT ticket; see [`coolify-runbook.md`](coolify-runbook.md) §8 (TLS termination) for where the cert files live on rigel.
 
 ---
 

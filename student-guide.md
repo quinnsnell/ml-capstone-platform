@@ -399,7 +399,7 @@ Coolify's Application-create flow now walks you through four screens:
 
 **Screen 2 — Select a source.** Pick **`byu-ml-capstone-coolify`**. Coolify contacts GitHub and pulls the list of repos the App can see under the org.
 
-**Screen 3 — Select repository.** Pick your class repo (e.g., `byu-ml-capstone/ml-capstone-<yourname>`). Click **Load Repository** to fetch its branches.
+**Screen 3 — Select repository.** Pick your class repo (e.g., `byu-ml-capstone/<team-slug>-<app>`). Click **Load Repository** to fetch its branches.
 
 **Screen 4 — Configuration.** Only 2 fields to set:
 
