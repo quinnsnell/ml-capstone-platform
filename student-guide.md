@@ -521,28 +521,19 @@ The webhook is `deploy`-scoped by itself, but the GitHub Actions job needs a Bea
 
 (Secret names match the ones used in the `sentiment-test-app` reference workflow so you can copy the workflow file as a template.)
 
-### 11. Prove the pipeline: make a real code change, watch it deploy
+### 11. Prove the pipeline: make a real code change (and see tests catch a bug)
 
-You've configured everything. Now the actual test — an end-to-end code change from your laptop → live URL. This walkthrough mirrors the day-to-day workflow you'll use for the rest of the semester.
+You've configured everything. Time to make a real code change from your laptop and watch it flow through GitHub Actions → Coolify → your live URL. This walkthrough includes an intentional test failure — that's the point, and you'll see WHY the tests-gate-deploy pattern matters.
 
-**Prep: clone your repo locally.**
+**Prep — clone your repo locally.**
 
 ```bash
 git clone https://github.com/byu-ml-capstone/<your-repo>.git
 cd <your-repo>
-```
-
-You should see both `main` and `staging` branches (assuming you ticked "Include all branches" in Step 4). Verify:
-
-```bash
 git branch -a
-# Expected:
-#   * main
-#     remotes/origin/main
-#     remotes/origin/staging
 ```
 
-If `staging` isn't there, create it:
+You should see both `main` and `staging` (assuming you ticked "Include all branches" in Step 4). If `staging` is missing:
 
 ```bash
 git checkout -b staging
@@ -550,62 +541,152 @@ git push -u origin staging
 git checkout main
 ```
 
-**Step A — Make a real code change on `staging`.**
+**Step A — Baseline: hit both live URLs to see the current state.**
 
-Bump the version so you can watch it change on the live URL. Open `greetings.py`, find the `APP_VERSION` line, change `0.1.1` → `0.1.2`.
+```bash
+curl -s http://<team-slug>-staging.ml-capstone.cs.byu.edu/health && echo
+curl -s http://<team-slug>.ml-capstone.cs.byu.edu/health && echo
+```
+
+Both should return `{"ok":true,"version":"0.1.1"}`. That's the template's starting version — you're about to change it.
+
+**Step B — Change the app's behavior on the `staging` branch.**
 
 ```bash
 git checkout staging
-# edit greetings.py — change APP_VERSION = "0.1.1" to "0.1.2"
-git diff greetings.py    # sanity check
+```
+
+Open `greetings.py` in your editor (`code greetings.py`, `vim greetings.py`, etc.). Make TWO changes:
+
+1. **Find the version line** and bump it:
+   ```python
+   APP_VERSION = "0.1.1"    # change this
+   APP_VERSION = "0.1.2"    # to this
+   ```
+
+2. **Find the Spanish greeting** in the `GREETINGS` dict and update it:
+   ```python
+   "es": "Hola, mundo",                    # change this
+   "es": "¡Hola desde v0.1.2!",            # to this
+   ```
+
+Save the file. Verify your diff shows exactly two changes:
+
+```bash
+git diff greetings.py
+```
+
+**Step C — Commit + push. Deliberately do NOT update the tests yet.**
+
+```bash
 git add greetings.py
-git commit -m "bump version to 0.1.2"
+git commit -m "v0.1.2: update Spanish greeting"
 git push
 ```
 
-**Step B — Watch it flow through GitHub Actions.**
+**Step D — Watch GitHub Actions FAIL. This is correct behavior.**
 
-Open `https://github.com/byu-ml-capstone/<your-repo>/actions` in a browser. You should see a new workflow run appear within seconds. Watch the `test` job run (~30s) → `deploy-staging` job fire (~5s).
+Open `https://github.com/byu-ml-capstone/<your-repo>/actions` in a browser. New workflow run appears within seconds. Watch:
 
-Common failure at this step:
-- **`curl: (6) Could not resolve host: ml-capstone-admin.cs.byu.edu`** — you forgot to rewrite the webhook URL in Step 10. Fix the secret, push another commit.
-- **`curl: The requested URL returned error: 405`** — someone deployed a stale workflow file without `-X POST`. Check `.github/workflows/ci.yml`'s deploy jobs — should be `curl -fsSL -X POST "..."` not `curl -fsSL "..."`.
+- **`test` job** runs → **fails** with an AssertionError:
+  ```
+  test_hello_spanish
+  AssertionError: assert {'hello': '¡Hola desde v0.1.2!'} == {'hello': 'Hola, mundo'}
+  ```
+- **`deploy-staging` job** never runs — because the test failed, GitHub Actions skips it. Your staging URL still returns `0.1.1`.
 
-**Step C — Verify the deploy landed.**
+**This is the whole point of the tests-gate-deploy pattern.** Your test asserted "the Spanish greeting must be `Hola, mundo`" — a contract. You changed the behavior without updating the contract. In production, you'd have shipped a lie. The test caught it BEFORE it went live.
 
-Open the Coolify Application's **Deployments** tab. You should see a new deployment fire in real time (~10s after Actions' deploy-staging step). Watch it run: pull → build → healthcheck → healthy.
+You now have two options:
 
-Then visit `http://<team-slug>-staging.ml-capstone.cs.byu.edu/health` in a browser. Should return:
+- **The change was wrong** → revert the code change and push again
+- **The change was intentional** → update the test to match the new expected behavior (this is what you'll do next)
 
-```json
-{"ok": true, "version": "0.1.2"}
+**Step E — Fix the test to match the new behavior.**
+
+Open `tests/test_api.py` in your editor. Find `test_hello_spanish`:
+
+```python
+def test_hello_spanish():
+    r = client.get("/", params={"lang": "es"})
+    assert r.status_code == 200
+    assert r.json() == {"hello": "Hola, mundo"}       # change this
+    assert r.json() == {"hello": "¡Hola desde v0.1.2!"}  # to this
 ```
 
-The version number confirms your code change actually made it into the running container. If you see `0.1.1`, the deploy went to Coolify but Docker cached the old image somewhere; hit **Deploy** manually in Coolify to force a fresh build.
+Save. Verify locally:
 
-**Step D — Promote staging → production.**
+```bash
+python3 -m pytest tests/ -v
+```
 
-Merge staging back into main:
+All 5 tests should now pass locally.
+
+**Step F — Commit the test fix + push.**
+
+```bash
+git add tests/test_api.py
+git commit -m "test: update Spanish assertion to match v0.1.2 greeting"
+git push
+```
+
+**In real life** you'd usually combine Steps B and E into a single commit — the code change and its test update belong together. We split them here to demonstrate the failure mode.
+
+**Step G — Watch GitHub Actions succeed + Coolify deploy.**
+
+New workflow run on GitHub Actions:
+- **`test` job** — green (~30s)
+- **`deploy-staging` job** — green (~5s), fires the Coolify webhook
+
+Open the Coolify staging Application → **Deployments** tab. New deployment appears within ~10s: pull → build → healthcheck → healthy. Total ~30-60s.
+
+**Step H — Verify staging deployed. Prod should still be at 0.1.1.**
+
+```bash
+curl -s http://<team-slug>-staging.ml-capstone.cs.byu.edu/health && echo
+curl -s "http://<team-slug>-staging.ml-capstone.cs.byu.edu/?lang=es" && echo
+curl -s http://<team-slug>.ml-capstone.cs.byu.edu/health && echo
+```
+
+Expected:
+```
+{"ok":true,"version":"0.1.2"}
+{"hello":"¡Hola desde v0.1.2!"}
+{"ok":true,"version":"0.1.1"}
+```
+
+Staging has the new behavior, prod hasn't been touched yet. This is exactly how a staging environment protects prod: you get to try changes in an environment that mirrors prod without customer impact.
+
+**Step I — Promote staging → main (production).**
 
 ```bash
 git checkout main
+git pull
 git merge staging
 git push
 ```
 
-Watch Actions again — this time `deploy-prod` fires instead of `deploy-staging`. Then `http://<team-slug>.ml-capstone.cs.byu.edu/health` returns `{"ok": true, "version": "0.1.2"}`.
+Watch Actions run again — this time `deploy-prod` fires instead of `deploy-staging` (the workflow gates them on branch name).
 
-If both URLs return the bumped version, your entire pipeline is working end-to-end. Everything after this is code.
+**Step J — Verify prod deployed.**
 
-**Step E — Try one more iteration for muscle memory.**
+```bash
+curl -s http://<team-slug>.ml-capstone.cs.byu.edu/health && echo
+curl -s "http://<team-slug>.ml-capstone.cs.byu.edu/?lang=es" && echo
+```
 
-Add a new language to the greetings dict in `greetings.py`. Something like `"it": "Ciao, mondo"`. Bump the version again. Push to staging, watch it deploy, then hit `http://<team-slug>-staging.ml-capstone.cs.byu.edu/?lang=it` — should return `{"hello": "Ciao, mondo"}`.
+Both should now return the 0.1.2 responses. **Your entire pipeline is proven end-to-end.** Everything after this is code — you know how the mechanics work.
 
-**Debugging failures:**
-- **GitHub Actions red** — click into the failed job → expand the failed step → read the error. Most common: forgot to rewrite webhook URLs (Step 10), or the workflow file has `curl` without `-X POST`.
+**Debugging failures during this walkthrough:**
+
+- **GitHub Actions red on `test` job** — usually intentional (Step D above). Update your test to match your code change (Step E) OR revert the code change if it was a mistake.
+- **GitHub Actions red on `deploy-staging` or `deploy-prod`** — the curl failed. Two common causes:
+  - `curl: (6) Could not resolve host: ml-capstone-admin.cs.byu.edu` → you forgot to rewrite the webhook URL in Step 10. Fix the secret, push another commit.
+  - `curl: The requested URL returned error: 405` → your workflow file has `curl` without `-X POST`. See `.github/workflows/ci.yml` — the deploy job should call `curl -fsSL -X POST "..."`.
 - **Coolify Deployments panel shows a red deploy** — click into it, read the build log. Common: Dockerfile references a file you didn't commit; `EXPOSE` port doesn't match Coolify's Port setting; container binds `127.0.0.1` instead of `0.0.0.0`.
-- **502 Bad Gateway on the live URL** — container is still starting (wait 30s), or crashed on startup (check container logs in Coolify).
+- **502 Bad Gateway on the live URL** — container is still starting (wait 30s), or crashed on startup (check Coolify container logs).
 - **Live URL returns old version** — Coolify built but didn't swap containers, OR your browser cached. Hard refresh (Cmd/Ctrl+Shift+R), then check the Deployments log to confirm a new container was started.
+- **`curl` returns `Found` but browser shows JSON** — Coolify's Traefik is 302-redirecting `http://` to `https://`. Your Application's Domain still starts with `https://` or Force HTTPS is on (Advanced tab). Fix per Step 5's note.
 
 ## Section 1: Build your first deployable app
 
