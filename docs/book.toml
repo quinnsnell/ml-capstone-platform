@@ -1,0 +1,35 @@
+[book]
+title = "ML Capstone Platform"
+authors = ["Quinn Snell"]
+description = "BYU CS classroom AI + CI/CD cluster — student and instructor documentation"
+src = "src"
+language = "en"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "coal"
+git-repository-url = "https://github.com/quinnsnell/ml-capstone-platform"
+edit-url-template = "https://github.com/quinnsnell/ml-capstone-platform/edit/main/{path}"
+site-url = "/ml-capstone-platform/"
+
+[output.html.search]
+enable = true
+limit-results = 30
+teaser-word-count = 30
+use-boolean-and = true
+boost-title = 2
+boost-hierarchy = 1
+boost-paragraph = 1
+expand = true
+heading-split-level = 3
+
+[output.html.playground]
+runnable = false
+
+[output.html.fold]
+enable = true
+level = 1
