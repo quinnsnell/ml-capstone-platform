@@ -1018,24 +1018,32 @@ name: CI/CD
 on:
   push:
     branches: [main, staging]
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+      - '.dockerignore'
   pull_request:
     branches: [main, staging]
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+      - '.dockerignore'
 
 jobs:
-  # Job 1 — unit tests + docker build. Runs on every push and every PR.
+  # Job 1 — unit tests. Runs on every push and every PR.
   # GitHub-hosted runner (public internet) is fine because unit tests don't hit VPN.
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-python@v5.4.0
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt
+          cache: pip
+      - name: Install dependencies
+        run: pip install fastapi 'uvicorn[standard]' pydantic httpx pytest
       - name: Unit tests
         run: pytest tests/ -v
-      - name: Docker build
-        run: docker build -t sentiment-app .
 
   # Job 2 — deploy to STAGING. Runs after tests pass, only on push to `staging`.
   # Coolify runs its /health check post-deploy; if /health fails, staging deploy fails.
@@ -1045,7 +1053,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Coolify staging deploy
-        run: curl -fsSL -X POST "${{ secrets.COOLIFY_DEPLOY_WEBHOOK_STAGING }}"
+        run: |
+          curl -fsSL -X POST "${{ secrets.COOLIFY_DEPLOY_WEBHOOK_STAGING }}" \
+            -H "Authorization: Bearer ${{ secrets.COOLIFY_API_TOKEN }}"
 
   # Job 3 — deploy to PROD. Runs after tests pass, only on push to `main`.
   # By convention, you push to main by merging a PR from staging (which is
@@ -1056,18 +1066,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Coolify prod deploy
-        run: curl -fsSL -X POST "${{ secrets.COOLIFY_DEPLOY_WEBHOOK_PROD }}"
+        run: |
+          curl -fsSL -X POST "${{ secrets.COOLIFY_DEPLOY_WEBHOOK_PROD }}" \
+            -H "Authorization: Bearer ${{ secrets.COOLIFY_API_TOKEN }}"
 ```
 
 ### What each piece does
 
-**`on:` block** — the trigger. Any push to `main` or `staging`, and any pull-request targeting them, kicks off a workflow run. Docs-only or CI-config-only changes are already excluded in the template's `paths-ignore` (not shown above for brevity — read `.github/workflows/ci.yml` in your repo for the full version).
+**`on:` block** — the trigger. Any push to `main` or `staging`, and any pull-request targeting them, kicks off a workflow run. `paths-ignore` excludes docs-only or config-only changes so a README typo doesn't burn a deploy.
 
 **Job 1 — `test`.**
 
 - Runs on **every** push and PR, regardless of branch.
-- Installs Python + your `requirements.txt`, runs `pytest tests/`.
-- Also does `docker build` in the reference workflow to catch Dockerfile problems before deploy.
+- Installs Python + a minimal dependency set, runs `pytest tests/`.
+- The template's pip install is hand-listed to stay fast (`pip install fastapi 'uvicorn[standard]' pydantic httpx pytest`). Once you grow real dependencies, switch this to `pip install -r requirements.txt`.
+- Consider adding a `docker build .` step to catch Dockerfile bugs before deploy — cheap, and reveals problems that pip-installed pytest can't.
 - Uses GitHub-hosted runners (Ubuntu) — public internet, so unit tests can't hit the VPN-only classroom LLM. Use `SKIP_LOCAL_MODEL=1` env or mocks in tests that would otherwise call it.
 
 **Job 2 — `deploy-staging`.**
@@ -1100,14 +1113,12 @@ jobs:
 
 Bigger changes (multi-repo builds, matrix testing, custom runners) — GitHub's [Actions documentation](https://docs.github.com/en/actions) is the authoritative reference.
 
-### 5a. Wire up your repo secrets
+### 5a. Verify your repo secrets are set
 
-Store the two webhook URLs your instructor gave you as **repo secrets**:
-
-1. GitHub repo → **Settings → Secrets and variables → Actions → New repository secret**
-2. Create two secrets:
-   - `COOLIFY_DEPLOY_WEBHOOK_STAGING` — staging Coolify deploy webhook URL
-   - `COOLIFY_DEPLOY_WEBHOOK_PROD` — production Coolify deploy webhook URL
+You should already have three secrets set from Setup Step 10:
+`COOLIFY_DEPLOY_WEBHOOK_STAGING`, `COOLIFY_DEPLOY_WEBHOOK_PROD`, and
+`COOLIFY_API_TOKEN`. Confirm they're present at **GitHub repo → Settings →
+Secrets and variables → Actions**. Missing any of them → back to Setup Step 10.
 
 ### 5b. Push and watch the pipeline light up
 
