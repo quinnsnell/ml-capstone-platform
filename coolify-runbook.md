@@ -384,7 +384,10 @@ Per row, the script (idempotently) creates:
 2. **`teams`** row with `personal_team=false`
 3. **`team_user`** pivot with `role='admin'` (v4.2 broke the `member` role)
 4. **`servers`** row named `ml-capstone` pointing at `host.docker.internal` (Coolify talks to Docker via the socket, not SSH)
-5. **`server_settings`** row with `is_reachable=true`, `is_usable=true`, `is_sentinel_enabled=false` — without this the dashboard 500s
+5. **`server_settings`** row with `is_reachable=true`, `is_usable=true`, `is_sentinel_enabled=false`, plus an encrypted placeholder `sentinel_token` — without any of these the dashboard 500s
+6. **`standalone_dockers`** destination on the `coolify` network — without this, the Application-create flow shows "Select a destination" with no options
+
+The script also deletes any redundant personal team that Coolify auto-creates on a roster user's first OAuth signup (the "No servers found" trap team). See its header docstring for the full preflight/plan/apply/verify flow.
 
 CSV shape (headers required): `team_name,email,name,github_username`. Multiple rows per email = user in multiple teams (this is how the "individual sandbox in Phase 1 → group team in Phase 2" arc works — Phase-2 rows get appended, Phase-1 rows stay).
 
