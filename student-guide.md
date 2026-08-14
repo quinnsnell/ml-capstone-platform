@@ -1579,8 +1579,13 @@ These bypass LiteLLM, so you must change the *model name* in your client from `c
 | Chat model | `classroom-chat` |
 | Autocomplete model | `classroom-autocomplete` (Continue only) |
 | VPN gateway | `cs-vpn.byu.edu` (GlobalProtect client) |
+| Coolify admin UI | `https://ml-capstone-admin.cs.byu.edu` (VPN) |
+| GitHub org | `github.com/byu-ml-capstone` |
 | Your staging URL | `http://<team-slug>-staging.ml-capstone.cs.byu.edu` |
 | Your prod URL | `http://<team-slug>.ml-capstone.cs.byu.edu` |
+| Repo naming convention | `<team-slug>-<app>` under `byu-ml-capstone/` |
+| Container port your app must listen on | `8000` (matches Coolify's Port setting) |
+| Container bind address | `0.0.0.0` (not `127.0.0.1` — see Section 1e) |
 | GitHub Actions secrets you'll set | `COOLIFY_DEPLOY_WEBHOOK_STAGING`, `COOLIFY_DEPLOY_WEBHOOK_PROD`, `COOLIFY_API_TOKEN` |
 | Template repo | `github.com/byu-ml-capstone/hello-world-app` (Use this template) |
 | Reference app | `github.com/byu-ml-capstone/sentiment-test-app` |
