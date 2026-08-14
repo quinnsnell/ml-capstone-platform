@@ -127,11 +127,11 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 done < <(tail -n +2 "$ROSTER")
 
 echo
-echo "  Rollup:                     COUNT"
-printf '    new invitations           %5d\n' "$new_invites"
-printf '    existing active members   %5d\n' "$active_members"
-printf '    pending (not accepted)    %5d\n' "$pending_members"
-printf '    skipped (no username/fail) %4d\n' "$skipped_rows"
+echo "  Rollup:                      COUNT"
+printf '    new invitations            %5d\n' "$new_invites"
+printf '    existing active members    %5d\n' "$active_members"
+printf '    pending (not accepted)     %5d\n' "$pending_members"
+printf '    skipped (no username/fail) %5d\n' "$skipped_rows"
 common_banner_end
 
 if (( ! APPLY )); then
