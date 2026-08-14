@@ -281,7 +281,7 @@ Open PR into `staging` branch → merge into `staging`
     │      → Coolify builds + swaps container  │
     │      → Coolify health check hits /health │
     │        (thorough — see Section 4)        │
-    │    → Group1-staging.ml-capstone.cs.byu.edu│
+    │    → group-1-staging.ml-capstone.cs.byu.edu│
     └──────────────────────────────────────────┘
                      │ Coolify reports healthy
                      ▼
@@ -294,7 +294,7 @@ Open PR from `staging` into `main` → merge into `main`
     │  [deploy-prod]                           │
     │    curl Coolify prod webhook             │
     │      → Coolify builds + swaps            │
-    │    → Group1.ml-capstone.cs.byu.edu        │
+    │    → group-1.ml-capstone.cs.byu.edu       │
     └──────────────────────────────────────────┘
 ```
 
@@ -1174,7 +1174,7 @@ Green here means: your staging deploy handles the diverse real inputs your users
 Sample output:
 
 ```
-integration-test.sh   target=http://Group1-staging.ml-capstone.cs.byu.edu
+integration-test.sh   target=http://group-1-staging.ml-capstone.cs.byu.edu
 ────────────────────────────────────────────────────────────────────────────
 
 Basic contract

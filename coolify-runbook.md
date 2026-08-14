@@ -328,7 +328,7 @@ Restart Coolify's proxy after wiring the cert in: `docker restart coolify-proxy`
 ## 9. Create the GitHub App
 
 1. In your class GitHub org, go to **Settings → Developer settings → GitHub Apps → New GitHub App**.
-2. **Name:** `class-coolify-deploy`
+2. **Name:** `byu-ml-capstone-coolify` (the name referenced everywhere else in these docs; must be globally unique across GitHub — pick a variant if it's taken).
 3. **Homepage URL:** `https://ml-capstone.cs.byu.edu`
 4. **Webhook URL:** `https://ml-capstone.cs.byu.edu/webhooks/source/github/events` (the exact path is in Coolify's UI when you create a GitHub source in §10)
 5. **Webhook secret:** generate a random string; save it.
