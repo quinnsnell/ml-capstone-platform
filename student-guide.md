@@ -403,6 +403,8 @@ You'll create your class repo **inside the org**, not under your personal accoun
 
 You now have a fresh repo at `github.com/byu-ml-capstone/<team-slug>-<app>` populated with a minimal FastAPI (`/`, `/health`, `/languages`) and the 3-job CI/CD workflow. The `byu-ml-capstone-coolify` App already has access to it — no install step needed.
 
+> **About the workflow:** your repo includes `.github/workflows/ci.yml` — this is the GitHub Actions workflow that runs your tests and triggers Coolify deploys. You don't need to write it (the template already has it), but you should understand it — Section 5 later in this guide walks through the file line by line. For now, just know that any push to `staging` or `main` triggers a workflow run that shows up in the Actions tab on your repo.
+
 **Finding your repo later:** org repos do NOT appear on your personal GitHub profile by default. To find yours:
 - **Bookmark it** — the URL is stable: `github.com/byu-ml-capstone/<your-repo>`
 - **Org page:** https://github.com/byu-ml-capstone lists every repo you have access to
@@ -1008,7 +1010,7 @@ Some Coolify configurations let you point liveness at `/ready` and readiness/dee
 
 ## Section 5: GitHub Actions — the 3-job pipeline
 
-Create `.github/workflows/ci.yml`:
+**Your repo already has `.github/workflows/ci.yml`** — you inherited it from the `hello-world-app` template in Setup Step 4. This section walks through what it does so you understand the mechanics (and can modify it later). The current file looks like this:
 
 ```yaml
 name: CI/CD
@@ -1057,11 +1059,46 @@ jobs:
         run: curl -fsSL -X POST "${{ secrets.COOLIFY_DEPLOY_WEBHOOK_PROD }}"
 ```
 
-Key details:
+### What each piece does
 
-- **`test`** runs everywhere (push + PR, any branch) so failing unit tests never sneak through
-- **`deploy-staging`** only fires on `push` to `staging` branch (not PRs) — merging to staging is the trigger. Coolify's health check gates whether the staging deploy is considered successful.
-- **`deploy-prod`** only fires on `push` to `main` and only if `test` passed. The typical path: PR from `staging` into `main`, merge → prod deploy.
+**`on:` block** — the trigger. Any push to `main` or `staging`, and any pull-request targeting them, kicks off a workflow run. Docs-only or CI-config-only changes are already excluded in the template's `paths-ignore` (not shown above for brevity — read `.github/workflows/ci.yml` in your repo for the full version).
+
+**Job 1 — `test`.**
+
+- Runs on **every** push and PR, regardless of branch.
+- Installs Python + your `requirements.txt`, runs `pytest tests/`.
+- Also does `docker build` in the reference workflow to catch Dockerfile problems before deploy.
+- Uses GitHub-hosted runners (Ubuntu) — public internet, so unit tests can't hit the VPN-only classroom LLM. Use `SKIP_LOCAL_MODEL=1` env or mocks in tests that would otherwise call it.
+
+**Job 2 — `deploy-staging`.**
+
+- Only runs on pushes (not PRs) to the `staging` branch.
+- `needs: test` — if tests failed, this never fires. This is the tests-gate-deploy pattern; it's what protects prod from broken code.
+- Uses two secrets you configured in Setup Step 10: `COOLIFY_DEPLOY_WEBHOOK_STAGING` (the URL to POST to) and `COOLIFY_API_TOKEN` (the Bearer token in the Authorization header).
+- The `curl -X POST` triggers Coolify to pull latest from the `staging` branch, rebuild the container, swap it in.
+
+**Job 3 — `deploy-prod`.**
+
+- Only runs on pushes (not PRs) to the `main` branch.
+- Same tests-gate-deploy protection.
+- Uses `COOLIFY_DEPLOY_WEBHOOK_PROD` + `COOLIFY_API_TOKEN`.
+- Typical path: PR from `staging` → `main`, merge, this fires.
+
+### Where the workflow lives + how to see runs
+
+- File: `.github/workflows/ci.yml` in your repo. Edit it like any other file: local checkout, commit, push.
+- Runs history: **Actions** tab on your repo's GitHub page.
+- Individual failed job: click the run → click the failed job → expand the step → read stderr. Most failures are self-explanatory.
+- Manual re-run: top-right of a failed run → **Re-run failed jobs**.
+
+### Common customizations
+
+- **Add another test suite:** append another `- run:` line inside the `test` job's `steps`. Runs in the same runner container as the pytest step.
+- **Only run tests on some paths:** add a `paths:` filter under `on: push:`. Useful once you have big non-code directories that shouldn't trigger CI.
+- **Add a linter:** add a step like `- run: pip install ruff && ruff check .` before `pytest`. `ruff` is fast and catches Python style issues.
+- **Notify Slack on failure:** add a `- if: failure()` step at the end of a job that curls a Slack webhook. Out of scope here but common at real companies.
+
+Bigger changes (multi-repo builds, matrix testing, custom runners) — GitHub's [Actions documentation](https://docs.github.com/en/actions) is the authoritative reference.
 
 ### 5a. Wire up your repo secrets
 

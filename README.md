@@ -1,5 +1,7 @@
 # Classroom AI + CI/CD Cluster
 
+> **📖 Read the guides as a website:** [**quinnsnell.github.io/ml-capstone-platform**](https://quinnsnell.github.io/ml-capstone-platform/) — searchable, sidebar navigation, mobile-friendly. Preferred entry point for students and instructors. This README stays here as the repo's landing page.
+
 Server-side infrastructure and docs for a shared classroom cluster that gives students:
 
 1. **AI coding assistance** in their editor — chat + inline ghost-text backed by a shared GPU pool (Qwen coder models via vLLM).
@@ -15,10 +17,12 @@ Everything runs on the BYU CS network. Only the GitHub webhook path is publicly 
 
 | You are… | Start here |
 |---|---|
-| **A student** — want to use the classroom LLM in your editor and/or deploy an app | [`student-guide.md`](student-guide.md) |
-| **An admin / instructor** — setting up the cluster or onboarding groups | [`admin-guide.md`](admin-guide.md), then [`onboarding.md`](onboarding.md) |
-| **A TA / assistant admin** — helping students hit a wall | [`troubleshooting.md`](troubleshooting.md) |
-| **Curious about how it's built** — architecture and design decisions | [`coolify-runbook.md`](coolify-runbook.md) |
+| **A student** — want to use the classroom LLM in your editor and/or deploy an app | [Student Setup Guide](https://quinnsnell.github.io/ml-capstone-platform/student-guide.html) |
+| **An admin / instructor** — setting up the cluster or onboarding groups | [Administrator Guide](https://quinnsnell.github.io/ml-capstone-platform/admin-guide.html), then [Onboarding Checklist](https://quinnsnell.github.io/ml-capstone-platform/onboarding.html) |
+| **A TA / assistant admin** — helping students hit a wall | [Troubleshooting](https://quinnsnell.github.io/ml-capstone-platform/troubleshooting.html) |
+| **Curious about how it's built** — architecture and design decisions | [Coolify Runbook](https://quinnsnell.github.io/ml-capstone-platform/coolify-runbook.html) |
+
+Or open the raw markdown in this repo: [`student-guide.md`](student-guide.md), [`admin-guide.md`](admin-guide.md), [`onboarding.md`](onboarding.md), [`coolify-runbook.md`](coolify-runbook.md), [`troubleshooting.md`](troubleshooting.md).
 
 ---
 
