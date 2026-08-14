@@ -34,7 +34,7 @@ You can use either capability or both. This guide walks you through setting up e
 
 ## Before you start
 
-**Install GlobalProtect and connect to the CS VPN** — the cluster is on the CS network. Only one URL (the GitHub webhook path) is reachable from the public internet; everything else, including the LLM endpoint and your deployed apps, requires VPN.
+**Install GlobalProtect and connect to the CS VPN** — the cluster is on the CS network. Only the GitHub webhook + Coolify deploy-API paths are reachable from the public internet (so GitHub Actions can trigger deploys); everything else, including the LLM endpoint and your deployed apps, requires VPN.
 
 - VPN gateway: `cs-vpn.byu.edu`
 - Client: GlobalProtect (BYU IT has installers and instructions at vpn.byu.edu) 

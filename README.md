@@ -9,7 +9,7 @@ Server-side infrastructure and docs for a shared classroom cluster that gives st
 
 Both capabilities live on a single hostname students remember: **`ml-capstone.cs.byu.edu`**.
 
-Everything runs on the BYU CS network. Only the GitHub webhook path is publicly reachable (via CS IT's HAProxy). The rest — LLM endpoint, admin UIs, deployed apps — requires the BYU CS VPN.
+Everything runs on the BYU CS network. Only the GitHub webhook and Coolify deploy-API paths are publicly reachable (via CS IT's HAProxy). The LLM endpoint and deployed student apps require the BYU CS VPN. The Coolify admin UI is publicly resolvable but gated by GitHub OAuth (invite-only).
 
 ---
 
@@ -75,9 +75,9 @@ ml-capstone-platform/
 |---|---|---|
 | Editor endpoint for the classroom LLM | `http://ml-capstone.cs.byu.edu:4000/v1` | VPN |
 | GitHub webhook (auto-deploy) | `https://ml-capstone.cs.byu.edu/webhooks/*` | Public internet (via CS IT HAProxy) |
-| Coolify API (deploy trigger from GitHub Actions) | `https://ml-capstone.cs.byu.edu/api/v1/deploy` | Public internet, token-gated |
-| Coolify admin UI | `https://ml-capstone-admin.cs.byu.edu` | VPN |
-| Student group apps | `https://<group>.ml-capstone.cs.byu.edu` | VPN |
+| Coolify API (deploy trigger from GitHub Actions) | `https://ml-capstone-admin.cs.byu.edu/api/v1/deploy/...` | Public internet, token-gated (via CS IT HAProxy) |
+| Coolify admin UI | `https://ml-capstone-admin.cs.byu.edu` | Publicly resolvable but OAuth-gated (invite-only) |
+| Student group apps | `http://<team-slug>.ml-capstone.cs.byu.edu` | VPN (serve HTTP — wildcard cert covers one level only) |
 
 Model aliases exposed by LiteLLM:
 
