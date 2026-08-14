@@ -60,10 +60,15 @@ docs/book/
 # =============================================================================
 # Nested repos (tracked separately on GitHub, not by this repo)
 # =============================================================================
-# sentiment-test-app is at github.com/quinnsnell/sentiment-test-app — students
-# clone that repo directly. Local checkout here is for convenience while
-# working on the platform.
+# Class app repos live at github.com/byu-ml-capstone/*. Keeping local clones
+# here (alongside the platform code) is convenient for testing but each is its
+# own git repo — exclude from this repo's tracking.
 sentiment-test-app/
+qsnell-hello-world-app/
+# Match any student's hello-world clone by the naming convention students use
+# (student-guide.md Step 4: <team-slug>-hello-world-app or similar).
+*-hello-world-app/
+hello-world-app/
 
 # =============================================================================
 # Local test artifacts
