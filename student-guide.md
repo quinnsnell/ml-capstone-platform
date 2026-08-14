@@ -300,18 +300,18 @@ Open PR from `staging` into `main` → merge into `main`
 
 **What your instructor sets up (once per group at term start):**
 
-- Provisions your Coolify Team + invites you by email (you sign in with your GitHub account — same email)
+- Provisions your Coolify Team + adds you to it (you sign in with your GitHub account — the email must match your roster row)
 - Attaches the shared `ml-capstone` deployment server to your team
-- Ensures the `byu-ml-capstone-coolify` GitHub App is available for you to install on your repo
+- Installed the `byu-ml-capstone-coolify` GitHub App on the whole `byu-ml-capstone` org, so it auto-covers any repo you create inside the org — you never install anything on GitHub yourself
 - Wildcard DNS `*.ml-capstone.cs.byu.edu` — anything under that name resolves to the cluster
 
 **What you (or your group) does:**
 
-- Create a shared GitHub repo (your group owner's account or a new one)
+- Accept the `byu-ml-capstone` org invite (see Setup Step 4) and create your class repo from the `hello-world-app` template
 - Sign into Coolify and set up your Applications — see **Setup: Sign in and create your Coolify Applications** below (one-time, ~15 min)
 - Write your app + Dockerfile + unit tests
 - Make your `/health` endpoint thorough enough to double as an automated smoke test (Section 4)
-- Add a GitHub Actions workflow with the three jobs above
+- The 3-job GitHub Actions workflow ships in the template — you just modify it as your app grows (Section 5)
 - Follow the branch flow: feature branch → PR to `staging` → PR to `main`
 
 > **Roadmap note.** Automated integration tests running from GitHub Actions against the live staging URL (Vercel-style Preview Deploys with full pytest) require a self-hosted runner inside the CS VPN. That's on the roadmap for once the class grows. For now, Coolify's health check runs as the deploy gate (Section 6, Tier 2), and you run `./integration-test.sh --staging` by hand before promoting to prod (Section 6, Tier 3).
