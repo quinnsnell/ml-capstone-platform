@@ -32,7 +32,7 @@ Five physical hosts on `.cs.byu.edu`, all VPN-only:
 
 | Host       | GPUs                                     | Role |
 |------------|------------------------------------------|------|
-| **rigel**  | 4× A6000 (48 GB each)                    | Front-end. Runs LiteLLM (`:4000`), Coolify UI (`:8000`), Coolify's Traefik (`:80`/`:443`), and student app containers |
+| **rigel**  | 4× A6000 (48 GB each)                    | Front-end. Runs LiteLLM (`:4000`), Coolify admin UI (`https://ml-capstone-admin.cs.byu.edu`), Coolify's Traefik (`:80`/`:443`), and student app containers |
 | **castor** | 1× Blackwell 96 GB + 1× RTX 4090 24 GB   | vLLM chat on Blackwell (`:8000`), vLLM FIM on 4090 (`:8010`) |
 | **pollux** | 2× Blackwell 96 GB                       | vLLM chat + FIM (same pattern as castor) |
 | **vega**   | 4× RTX 6000 Pro                          | Reserved for TLJH (JupyterHub) for other courses |

@@ -46,10 +46,19 @@ Creates one GitHub Team per unique `team_name` in the roster (slug = `slugify(te
 
 ### 3. Create Coolify teams, users, servers, destinations
 
-Runs on rigel via ssh (needs docker access to the coolify-db container):
+> **⚠ Do this first, once per term: run `--check-schema` before `--apply`.**
+> `provision-teams.sh` writes directly to Coolify's Postgres — 6 tables (users, teams, team_user, servers, server_settings, standalone_dockers). Coolify may have auto-updated its container tag past the `4.2.x` version this script was written against, and a schema change (column renamed / added-with-NOT-NULL / removed) will silently mis-provision teams. The `--check-schema` flag dumps the current DB layout so you can compare against what the script INSERTs into. **Run it every term** before the first `--apply`:
+>
+> ```bash
+> ssh rigel 'cd ~/ml-capstone-platform && git pull && sudo ./scripts/provision-teams.sh --check-schema'
+> ```
+>
+> If the preflight prints `Coolify version: X.Y.Z (untested; script proven against 4.2.x)`, stop and inspect the schema output before proceeding. If it prints `known-good`, you're safe to `--apply`.
+
+Then run the real provisioning (on rigel — needs docker access to the coolify-db container):
 
 ```bash
-ssh rigel 'cd ~/ml-capstone-platform && git pull && sudo ./scripts/provision-teams.sh --roster roster-2026-fall.csv --apply'
+ssh rigel 'cd ~/ml-capstone-platform && sudo ./scripts/provision-teams.sh --roster roster-2026-fall.csv --apply'
 ```
 
 Or if you have `roster-*.csv` on your laptop but not rigel, `scp` it first:

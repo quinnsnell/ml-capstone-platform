@@ -719,14 +719,21 @@ You can delete `greetings.py`, `main.py`, and `tests/test_api.py` from the templ
 
 ### 1c. Write `main.py`
 
-A FastAPI service with two endpoints — `/health` for status, `/analyze` for text classification via the classroom LLM.
+A FastAPI service with four endpoints:
+
+- `GET /ready` — cheap "am I alive?" — no dependencies exercised.
+- `GET /gpu` — introspects the container's GPU visibility (helps you verify Coolify's GPU config actually attached one).
+- `GET /health` — deep check; Coolify polls this after each deploy and rolls back if it's not 200.
+- `POST /analyze` — the real feature; classifies text via the classroom LLM.
 
 ```python
 """Small sentiment-classifier via the classroom LiteLLM.
 
+GET  /ready    -> { "ready": true }                    # cheap liveness
+GET  /gpu      -> { device info }                       # GPU introspection
+GET  /health   -> { "ok": true, "litellm": "<url>" }    # deep health (extended in Section 4)
 POST /analyze  { "text": "..." }
   -> { "text", "sentiment": positive|negative|neutral, "confidence", "reasoning" }
-GET  /health   -> { "ok": true, "litellm": "<url>" }
 
 Config via environment variables (never hardcode):
   LITELLM_URL      default http://ml-capstone.cs.byu.edu:4000/v1
@@ -779,8 +786,58 @@ def _extract_json(content: str) -> dict:
     return json.loads(m.group(0))
 
 
+@app.get("/ready")
+def ready():
+    """Cheap liveness check. Proves the Python process is up and accepting HTTP.
+
+    Deliberately does NOT touch the LLM, GPU, or any I/O. Use this from external
+    monitors that just want "is the container alive" without incurring a real
+    LLM call every 30 seconds.
+    """
+    return {"ready": True}
+
+
+@app.get("/gpu")
+def gpu():
+    """GPU introspection — reports what CUDA devices this container can see.
+
+    This one is a debugging tool for YOU. When Coolify's Advanced-tab GPU
+    config is right, `cuda_available` is true and `devices` lists the A6000(s)
+    your container was granted. If `cuda_available` is false but you expect a
+    GPU, the container isn't seeing one — check Coolify's Advanced → GPU
+    settings (Setup Step 7) and that torch was installed with CUDA support.
+    """
+    info = {"torch_installed": False, "cuda_available": False, "devices": []}
+    try:
+        import torch
+        info["torch_installed"] = True
+        info["torch_version"] = torch.__version__
+        info["cuda_available"] = torch.cuda.is_available()
+        if torch.cuda.is_available():
+            info["device_count"] = torch.cuda.device_count()
+            info["devices"] = [
+                {
+                    "index": i,
+                    "name": torch.cuda.get_device_name(i),
+                    "memory_total_gb": round(
+                        torch.cuda.get_device_properties(i).total_memory / (1024**3), 1
+                    ),
+                }
+                for i in range(torch.cuda.device_count())
+            ]
+    except ImportError:
+        pass  # torch not installed — that's fine for a pure-LLM app
+    return info
+
+
 @app.get("/health")
 def health():
+    """Deep health check. Coolify polls this after every deploy.
+
+    Currently shallow — just reports config. In Section 4 you'll extend this
+    to actually call the LLM so a broken LLM path fails the deploy instead of
+    shipping a container that returns 500 on every /analyze.
+    """
     return {"ok": True, "litellm": LITELLM_URL, "model": MODEL}
 
 
@@ -814,8 +871,10 @@ def analyze(req: AnalyzeRequest):
 
 Key patterns to notice:
 
+- **Three health-ish endpoints, three purposes.** `/ready` = "process is up" (cheap, safe to hit every second). `/gpu` = "what hardware did I get?" (debugging). `/health` = "is the whole thing actually working?" (Coolify's deploy gate — Section 4 makes it deep). Separating them lets each caller pay only for what it needs.
 - **`os.environ.get("LITELLM_URL", "default")`** — reads the LLM URL from an env var. Never hardcode it. Different envs (local, prod) supply different values.
 - **`app.run(host="0.0.0.0")`** happens inside the container via uvicorn (see Dockerfile) — binding to loopback would make the container unreachable from Coolify's proxy.
+- **`import torch` inside the endpoint, not at module top.** If you haven't installed torch yet (Section 1 doesn't — it's optional), `/gpu` still returns a valid JSON response saying `torch_installed: false` instead of crashing app startup. Deferred imports keep optional dependencies optional.
 
 ### 1d. Write `requirements.txt`
 
@@ -993,20 +1052,14 @@ Now when Coolify polls `/health`:
 
 This is a valid engineering pattern — treating your health check as a live integration test. Trade-off: `/health` now costs a small LLM call per poll (Coolify defaults to every ~30s), so keep the token budget tiny.
 
-### Add a `/ready` endpoint for the shallow check
+### Why keep `/ready` separate
 
-Some infrastructures want a cheap "am I up" check separate from the deep "am I working" check. Convention:
+You already have `/ready` from Section 1 — cheap, no I/O, just proves the process is up. Now that `/health` costs a real LLM call per poll, the separation matters:
 
-- `/ready` — cheap, just returns 200 (are we accepting traffic?)
-- `/health` — deep, exercises real dependencies (are we actually working?)
+- **`/ready`** — external liveness monitors ("is the container alive?") can hit this every second without generating LLM load.
+- **`/health`** — Coolify's deploy gate ("does the full chain actually work?") gets called only after each deploy, so the LLM cost is one-time-per-release, not per-request.
 
-```python
-@app.get("/ready")
-def ready():
-    return {"ready": True}
-```
-
-Some Coolify configurations let you point liveness at `/ready` and readiness/deep at `/health` separately. Not strictly required for MVP.
+Some Coolify configurations let you point liveness at `/ready` and the deep readiness check at `/health` explicitly; the default single-endpoint mode uses `/health`, which is what the template's Dockerfile HEALTHCHECK does.
 
 ## Section 5: GitHub Actions — the 3-job pipeline
 
@@ -1081,7 +1134,7 @@ jobs:
 - Installs Python + a minimal dependency set, runs `pytest tests/`.
 - The template's pip install is hand-listed to stay fast (`pip install fastapi 'uvicorn[standard]' pydantic httpx pytest`). Once you grow real dependencies, switch this to `pip install -r requirements.txt`.
 - Consider adding a `docker build .` step to catch Dockerfile bugs before deploy — cheap, and reveals problems that pip-installed pytest can't.
-- Uses GitHub-hosted runners (Ubuntu) — public internet, so unit tests can't hit the VPN-only classroom LLM. Use `SKIP_LOCAL_MODEL=1` env or mocks in tests that would otherwise call it.
+- Uses GitHub-hosted runners (Ubuntu) — public internet, so unit tests can't hit the VPN-only classroom LLM (and won't have a GPU either). Keep unit tests offline: mock the network call, use FastAPI dependency overrides, OR add an env-guarded short-circuit in your app so tests can skip the expensive path. The reference `sentiment-test-app` uses the latter pattern — its code checks `SKIP_LOCAL_MODEL=1` and skips loading the ~500 MB local HuggingFace pipeline during CI (see its `main.py` / `config.py`). Your own code has to opt in — the env var doesn't do anything unless you check it.
 
 **Job 2 — `deploy-staging`.**
 
