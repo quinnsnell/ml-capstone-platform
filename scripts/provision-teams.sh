@@ -97,32 +97,19 @@ done
 psql_ro()  { docker exec -i "$COOLIFY_DB_CONTAINER" psql -U "$COOLIFY_DB_USER" -d "$COOLIFY_DB_NAME" -At -F$'\t' "$@"; }
 psql_exec() { docker exec -i "$COOLIFY_DB_CONTAINER" psql -U "$COOLIFY_DB_USER" -d "$COOLIFY_DB_NAME" -v ON_ERROR_STOP=1 "$@"; }
 
-# ---- --check-schema ----------------------------------------------------
-# Dump every table this script writes to, so an operator can diff against
-# REQUIRED_COLS after a Coolify upgrade.
-if (( CHECK_SCHEMA )); then
-    for tbl in users teams team_user servers server_settings standalone_dockers; do
-        echo "=== $tbl ==="
-        docker exec "$COOLIFY_DB_CONTAINER" psql -U "$COOLIFY_DB_USER" -d "$COOLIFY_DB_NAME" -c "\d $tbl"
-    done
-    exit 0
-fi
-
-# ---- Pick roster --------------------------------------------------------
-ROSTER=$(common_pick_roster "$ROSTER") || exit $?
-[[ -r "$ROSTER" ]] || { echo "Cannot read $ROSTER" >&2; exit 2; }
-
-# ---- Sanity: DB reachable + expected tables exist ----------------------
+# ---- Sanity: DB reachable ----------------------------------------------
+# Needed for both --check-schema and the normal path.
 if ! docker exec "$COOLIFY_DB_CONTAINER" pg_isready -U "$COOLIFY_DB_USER" -d "$COOLIFY_DB_NAME" >/dev/null 2>&1; then
     echo "Cannot reach Postgres in container '$COOLIFY_DB_CONTAINER'." >&2
     echo "Is Coolify running? Try: docker ps | grep coolify-db" >&2
     exit 3
 fi
 
-# ---- Preflight: Coolify version + schema fingerprint --------------------
+# ---- Preflight: Coolify version ----------------------------------------
+# Print version + known-good status FIRST — matters for both --check-schema
+# (so operator sees which version they're auditing) and the normal path.
 common_banner "PREFLIGHT"
 
-# Detect Coolify version from the image tag on the running container.
 COOLIFY_IMAGE=$(docker inspect coolify --format '{{.Config.Image}}' 2>/dev/null || echo "")
 COOLIFY_VERSION="${COOLIFY_IMAGE##*:}"
 if [[ -z "$COOLIFY_VERSION" ]]; then
@@ -142,6 +129,26 @@ case "$COOLIFY_VERSION" in
 esac
 printf '  Coolify version:  %s (%s; script proven against %s)\n' \
     "$COOLIFY_VERSION" "$version_status" "${KNOWN_GOOD_MAJOR_MINORS// /.x, }.x"
+
+# ---- --check-schema: dump tables and exit ------------------------------
+# Runs AFTER the version banner so the operator sees which Coolify version
+# they're auditing. Dumps every table this script writes to, so an operator
+# can diff against REQUIRED_COLS after a Coolify upgrade.
+if (( CHECK_SCHEMA )); then
+    common_banner_end
+    for tbl in users teams team_user servers server_settings standalone_dockers; do
+        echo
+        echo "=== $tbl ==="
+        docker exec "$COOLIFY_DB_CONTAINER" psql -U "$COOLIFY_DB_USER" -d "$COOLIFY_DB_NAME" -c "\d $tbl"
+    done
+    exit 0
+fi
+
+# ---- Pick roster (normal path only) ------------------------------------
+ROSTER=$(common_pick_roster "$ROSTER") || exit $?
+[[ -r "$ROSTER" ]] || { echo "Cannot read $ROSTER" >&2; exit 2; }
+
+# ---- Schema fingerprint check ------------------------------------------
 
 # Check every table + every column we're about to INSERT into. If Coolify
 # renames or removes any of these on upgrade, abort loudly here rather than
