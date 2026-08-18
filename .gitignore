@@ -21,6 +21,11 @@ MJ-test-key
 .env.production
 coolify-env
 
+# Real class rosters (FERPA — never commit real student emails/usernames).
+# The example roster IS tracked so the file format is discoverable.
+roster-*.csv
+!roster-example.csv
+
 # GitHub App private keys (extra explicit — any .pem ending)
 ml-capstone-coolify*.pem
 *-github-app*.pem
