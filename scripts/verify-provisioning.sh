@@ -57,18 +57,23 @@ source "$LIB_DIR/common.sh"
 
 ROSTER=""
 VERBOSE=0
+# Observer email (matches provision-teams.sh --observer / OPERATOR_EMAIL).
+# If set, we additionally check that this user is admin of every provisioned team.
+OBSERVER_EMAIL="${OPERATOR_EMAIL:-}"
 
 # ---- Argument parsing ---------------------------------------------------
 usage() { common_usage "$0"; exit 0; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --roster)   ROSTER="$2"; shift 2 ;;
-        --verbose)  VERBOSE=1; shift ;;
-        -h|--help)  usage ;;
+        --roster)    ROSTER="$2"; shift 2 ;;
+        --observer)  OBSERVER_EMAIL="$2"; shift 2 ;;
+        --verbose)   VERBOSE=1; shift ;;
+        -h|--help)   usage ;;
         *) echo "Unknown option: $1" >&2; echo "Run with --help." >&2; exit 2 ;;
     esac
 done
+[[ -n "$OBSERVER_EMAIL" ]] && OBSERVER_EMAIL="${OBSERVER_EMAIL,,}"
 
 # ---- Slugify — must match provision-gh-teams.sh --------------------------
 slugify() {
@@ -114,6 +119,13 @@ DB_PIVOTS=$(psql_ro -c "SELECT t.name || E'\t' || u.email FROM team_user tu JOIN
 DB_SERVERS=$(psql_ro -c "SELECT t.name FROM servers s JOIN teams t ON t.id = s.team_id WHERE s.name = 'ml-capstone' AND s.deleted_at IS NULL;")
 DB_SETTINGS_OK=$(psql_ro -c "SELECT t.name FROM server_settings ss JOIN servers s ON s.id = ss.server_id JOIN teams t ON t.id = s.team_id WHERE s.name = 'ml-capstone' AND s.deleted_at IS NULL AND ss.sentinel_token IS NOT NULL AND length(ss.sentinel_token) >= 100;")
 DB_DESTINATIONS=$(psql_ro -c "SELECT t.name FROM standalone_dockers sd JOIN servers s ON s.id = sd.server_id JOIN teams t ON t.id = s.team_id WHERE s.name = 'ml-capstone' AND s.deleted_at IS NULL AND sd.network = 'coolify';")
+
+# Observer team memberships (empty set if OBSERVER_EMAIL unset).
+DB_OBSERVER_TEAMS=""
+if [[ -n "$OBSERVER_EMAIL" ]]; then
+    esc_obs=${OBSERVER_EMAIL//\'/\'\'}
+    DB_OBSERVER_TEAMS=$(psql_ro -c "SELECT t.name FROM team_user tu JOIN teams t ON t.id = tu.team_id JOIN users u ON u.id = tu.user_id WHERE u.email = '$esc_obs';")
+fi
 
 # Fixed-string exact-line grep against a $'\n'-separated list
 has_line() { grep -qxF -- "$2" <<<"$1"; }
@@ -186,10 +198,15 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     db_srv="MISS";   has_line "$DB_SERVERS"         "$team_name"                   && db_srv="OK"
     db_set="MISS";   has_line "$DB_SETTINGS_OK"     "$team_name"                   && db_set="OK"
     db_dest="MISS";  has_line "$DB_DESTINATIONS"    "$team_name"                   && db_dest="OK"
+    if [[ -n "$OBSERVER_EMAIL" ]]; then
+        db_obs="MISS"; has_line "$DB_OBSERVER_TEAMS" "$team_name" && db_obs="OK"
+    else
+        db_obs="n/a"
+    fi
 
     # Compute per-row pass/fail. n/a doesn't count against.
     row_failed=0
-    for v in "$gh_org" "$gh_team" "$gh_memb" "$db_user" "$db_team" "$db_piv" "$db_srv" "$db_set" "$db_dest"; do
+    for v in "$gh_org" "$gh_team" "$gh_memb" "$db_user" "$db_team" "$db_piv" "$db_srv" "$db_set" "$db_dest" "$db_obs"; do
         [[ "$v" == "MISS" ]] && row_failed=1
     done
     (( row_failed )) && failed_rows=$((failed_rows + 1))
@@ -208,11 +225,12 @@ while IFS= read -r line || [[ -n "$line" ]]; do
         printf '    [DB ] servers row (ml-capstone)      %s\n' "$db_srv"
         printf '    [DB ] server_settings (has token)    %s\n' "$db_set"
         printf '    [DB ] standalone_dockers destination %s\n' "$db_dest"
+        printf '    [DB ] observer (%s) is team admin  %s\n' "${OBSERVER_EMAIL:-<unset>}" "$db_obs"
         printf '    RESULT: %s\n' "$marker"
     else
         # Terse: one line per row, ✓/✗ per check
         gh_col=$(printf '%s|%s|%s' "$gh_org" "$gh_team" "$gh_memb")
-        db_col=$(printf '%s|%s|%s|%s|%s|%s' "$db_user" "$db_team" "$db_piv" "$db_srv" "$db_set" "$db_dest")
+        db_col=$(printf '%s|%s|%s|%s|%s|%s|obs:%s' "$db_user" "$db_team" "$db_piv" "$db_srv" "$db_set" "$db_dest" "$db_obs")
         printf '  %s %-22s %-24s %-32s  %-19s  %s\n' \
             "$marker" "$team_name" "${gh_user:-<no github>}" "$email" "$gh_col" "$db_col"
     fi
@@ -225,10 +243,21 @@ common_banner_end
 
 # ---- Layer 3 checklist reminder -----------------------------------------
 common_banner "MANUAL UI SMOKE TEST (cannot script — do once per team)"
+if [[ -n "$OBSERVER_EMAIL" ]]; then
+    printf '  Since you were added as admin of every team via --observer, they all\n'
+    printf '  appear in Coolify'"'"'s team switcher under your own login (%s).\n' "$OBSERVER_EMAIL"
+    printf '  No DB-dance needed. Sign in and walk each team:\n\n'
+else
+    cat <<'EOF'
+  You didn't pass --observer, so provisioned teams don't appear in your
+  team switcher. Either re-run provision-teams.sh --observer <you>@..., or
+  do the manual DB-dance the old-fashioned way (add self as team_user row,
+  walk, delete the row) — see onboarding.md §4.
+
+EOF
+fi
 cat <<'EOF'
-  For each provisioned team, sign into https://ml-capstone-admin.cs.byu.edu
-  as a super-admin (yourself), switch INTO the team via the team switcher,
-  and verify:
+  For each provisioned team, switch to it in the team switcher and verify:
 
     [ ]  Servers → 'ml-capstone' shows green "reachable"
     [ ]  Click into ml-capstone → server-show page loads (no 500)
@@ -239,7 +268,6 @@ cat <<'EOF'
     [ ]  Screen 2: source 'byu-ml-capstone-coolify' is pickable
     [ ]  Screen 3: Load Repository → org repos listed (incl. hello-world-app)
     [ ]  Bail on Screen 4; delete the throwaway Project (Danger Zone)
-    [ ]  Switch back to your own team
 
   Teams to walk through:
 EOF

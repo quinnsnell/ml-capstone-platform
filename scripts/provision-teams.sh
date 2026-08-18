@@ -48,7 +48,12 @@
 #   ./provision-teams.sh                        # dry-run, newest roster-*.csv
 #   ./provision-teams.sh --apply                # execute for real
 #   ./provision-teams.sh --roster path.csv      # explicit roster file
-#   ./provision-teams.sh --check-schema         # dump users/teams/team_user schema, exit
+#   ./provision-teams.sh --observer <email>     # add this user as admin of every
+#                                               # team so they can see + help in UI.
+#                                               # Falls back to $OPERATOR_EMAIL env var.
+#                                               # Set OPERATOR_EMAIL in your rigel shell
+#                                               # profile to make this automatic.
+#   ./provision-teams.sh --check-schema         # dump all 6 tables' schemas, exit
 #   ./provision-teams.sh --show-sql             # also print the raw SQL (default: plan only)
 #   ./provision-teams.sh -h                     # this help
 # =============================================================================
@@ -69,6 +74,10 @@ APPLY=0
 CHECK_SCHEMA=0
 SHOW_SQL=0
 ROSTER=""
+# Observer: an admin who gets added to every provisioned team so they can see
+# and help in the UI. Set via --observer <email> or OPERATOR_EMAIL env var.
+# Silently no-op if unset (backward compatible).
+OBSERVER_EMAIL="${OPERATOR_EMAIL:-}"
 
 # Coolify major.minor versions this script has been proven against. New minors
 # are likely fine but flag them so the operator can decide. Space-separated
@@ -84,12 +93,22 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --apply)         APPLY=1; shift ;;
         --roster)        ROSTER="$2"; shift 2 ;;
+        --observer)      OBSERVER_EMAIL="$2"; shift 2 ;;
         --check-schema)  CHECK_SCHEMA=1; shift ;;
         --show-sql)      SHOW_SQL=1; shift ;;
         -h|--help)       usage ;;
         *) echo "Unknown option: $1" >&2; echo "Run with --help." >&2; exit 2 ;;
     esac
 done
+
+# Normalize + validate observer email if provided.
+if [[ -n "$OBSERVER_EMAIL" ]]; then
+    OBSERVER_EMAIL="${OBSERVER_EMAIL,,}"
+    if [[ ! "$OBSERVER_EMAIL" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
+        echo "ERROR: --observer email '$OBSERVER_EMAIL' doesn't look like a valid address." >&2
+        exit 2
+    fi
+fi
 
 # ---- Postgres helper ----------------------------------------------------
 # psql invocations run inside the coolify-db container. -A: unaligned output,
@@ -222,6 +241,24 @@ if [[ -z "$ENC_SENTINEL_TOKEN" || ${#ENC_SENTINEL_TOKEN} -lt 100 ]]; then
     echo "  Expected a >=100-char Laravel Crypt payload; got: '${ENC_SENTINEL_TOKEN:0:60}...'" >&2
     echo "Aborting — refusing to insert rows without a valid encrypted placeholder." >&2
     exit 3
+fi
+
+# ---- Resolve observer (if provided) -------------------------------------
+# The observer becomes an admin of every team we provision so they can see
+# and help in the UI without the manual DB-dance. Look up their user_id
+# once; skip loudly if the email isn't in users yet.
+OBSERVER_USER_ID=""
+if [[ -n "$OBSERVER_EMAIL" ]]; then
+    esc_obs=${OBSERVER_EMAIL//\'/\'\'}
+    OBSERVER_USER_ID=$(psql_ro -c "SELECT id FROM users WHERE email = '$esc_obs';" | head -n1)
+    if [[ -z "$OBSERVER_USER_ID" ]]; then
+        echo "ERROR: --observer email '$OBSERVER_EMAIL' not found in Coolify's users table." >&2
+        echo "Sign in to Coolify at least once with that email (GitHub OAuth) so a users" >&2
+        echo "row exists, then re-run. Aborting to avoid silent no-op." >&2
+        exit 3
+    fi
+    printf '  Observer:         %s (user_id=%s) will be added as admin of every team\n' \
+        "$OBSERVER_EMAIL" "$OBSERVER_USER_ID"
 fi
 
 # ---- Read + validate CSV ------------------------------------------------
@@ -405,6 +442,13 @@ SELECT t.id, u.id, 'admin', NOW(), NOW()
 FROM teams t, users u
 WHERE t.name = '$e_team_name' AND u.email = '$e_email'
 ON CONFLICT (team_id, user_id) DO NOTHING;
+${OBSERVER_USER_ID:+
+-- Observer ($OBSERVER_EMAIL) as admin of this team so they can see + help in UI
+INSERT INTO team_user (team_id, user_id, role, created_at, updated_at)
+SELECT t.id, $OBSERVER_USER_ID, 'admin', NOW(), NOW()
+FROM teams t WHERE t.name = '$e_team_name'
+ON CONFLICT (team_id, user_id) DO NOTHING;
+}
 
 -- Server 'ml-capstone' for team $team_name — abstracted from physical host so
 -- we can move it later. Idempotent on team_id + name; ignores soft-deletes.

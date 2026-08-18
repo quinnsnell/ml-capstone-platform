@@ -83,10 +83,12 @@ The per-row plan shows CREATE/EXISTS for each of the 6 tables (users, teams, tea
 
 **Step 3c — apply:**
 ```bash
-ssh rigel 'cd ~/ml-capstone-platform && ./scripts/provision-teams.sh --roster roster-2026-fall.csv --apply'
+ssh rigel 'OPERATOR_EMAIL=snell@cs.byu.edu cd ~/ml-capstone-platform && ./scripts/provision-teams.sh --roster roster-2026-fall.csv --apply'
 ```
 
 The script runs preflight → plan → apply → verify in one transactional batch. If any preflight fails, it aborts cleanly without touching state. If the post-apply verify fails, it exits non-zero so you notice.
+
+> **`--observer <email>` (or `OPERATOR_EMAIL` env var)** adds you as an admin of every provisioned team so they all appear in your Coolify team switcher. Without it, provisioned teams are invisible to your login (multi-tenant isolation) and you'd need to manually add yourself to each team's `team_user` row to walk the UI checklist in step 4. Set `OPERATOR_EMAIL` in your rigel shell profile (`~/.bashrc`) once and forget it. The observer email must already exist in Coolify's `users` table — sign in at least once via GitHub OAuth so the row exists.
 
 ### 4. Smoke-test everything before handing off to students
 
@@ -107,22 +109,15 @@ Output modes:
 
 Exit code is 0 if every row passed every check; non-zero if any row missed any artifact.
 
-**Then walk the manual UI checklist the script prints at the end.** For each unique team it lists:
+**Then walk the manual UI checklist the script prints at the end.** Because you provisioned with `--observer`, every team already appears in your Coolify team switcher — no DB-dance needed. For each unique team, switch to it in Coolify and walk:
 
-1. Sign into `https://ml-capstone-admin.cs.byu.edu` as yourself, then temporarily add yourself to the team as an admin so the team switcher shows it (one-liner in the checklist output):
-   ```bash
-   docker exec -i coolify-db psql -U coolify -d coolify -c "INSERT INTO team_user (team_id, user_id, role, created_at, updated_at) SELECT t.id, u.id, 'admin', NOW(), NOW() FROM teams t, users u WHERE t.name = '<team_name>' AND u.email = '<your_email>' ON CONFLICT DO NOTHING;"
-   ```
-2. Refresh Coolify, switch to that team, and walk:
-   - **Servers → ml-capstone** — server-show page loads without a 500 (this is where the encrypted `sentinel_token` bug bit us; if this page renders, existing rows are compatible with the current Coolify version)
-   - **Projects → + New Project** (throwaway name) → into production env → **+ Add Resource → Private Repository (with GitHub App)** and confirm Screens 1-3: destination `coolify` pickable, source `byu-ml-capstone-coolify` pickable, org repos load including `hello-world-app`. Bail on Screen 4.
-   - Delete the throwaway Project (Danger Zone).
-3. Remove yourself from the team so it's clean for the student:
-   ```bash
-   docker exec -i coolify-db psql -U coolify -d coolify -c "DELETE FROM team_user WHERE team_id = (SELECT id FROM teams WHERE name='<team_name>') AND user_id = (SELECT id FROM users WHERE email='<your_email>');"
-   ```
+- **Servers → ml-capstone** — server-show page loads without a 500 (this is where the encrypted `sentinel_token` bug bit us; if this page renders, existing rows are compatible with the current Coolify version).
+- **Projects → + New Project** (throwaway name) → into production env → **+ Add Resource → Private Repository (with GitHub App)**. Confirm Screens 1-3: destination `coolify` pickable, source `byu-ml-capstone-coolify` pickable, org repos load including `hello-world-app`. Bail on Screen 4.
+- Delete the throwaway Project (Danger Zone).
 
 The UI walkthrough is manual because Coolify's Livewire pages need a real browser session — no CLI substitute exists. Once per unique team, before turning students loose.
+
+Your observer membership stays on the team long-term so you can help students debug from your own login. Coolify's team-scoped views mean you see exactly what the student sees, without impersonating them.
 
 ---
 
