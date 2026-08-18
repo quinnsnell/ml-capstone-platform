@@ -70,9 +70,12 @@ CHECK_SCHEMA=0
 SHOW_SQL=0
 ROSTER=""
 
-# Coolify versions this script has been proven against. New minors are likely
-# fine but flag them so the operator can decide.
-KNOWN_GOOD_MAJOR_MINOR="4.2"
+# Coolify major.minor versions this script has been proven against. New minors
+# are likely fine but flag them so the operator can decide. Space-separated
+# list; each entry matches "<entry>.*" (e.g. "4.2" matches 4.2.0, 4.2.7, ...).
+# When Coolify ships a new minor, re-run with --check-schema, diff against
+# REQUIRED_COLS below, and append the new minor here if compatible.
+KNOWN_GOOD_MAJOR_MINORS="4.2 4.3"
 
 # ---- Argument parsing ---------------------------------------------------
 usage() { common_usage "$0"; exit 0; }
@@ -95,10 +98,13 @@ psql_ro()  { docker exec -i "$COOLIFY_DB_CONTAINER" psql -U "$COOLIFY_DB_USER" -
 psql_exec() { docker exec -i "$COOLIFY_DB_CONTAINER" psql -U "$COOLIFY_DB_USER" -d "$COOLIFY_DB_NAME" -v ON_ERROR_STOP=1 "$@"; }
 
 # ---- --check-schema ----------------------------------------------------
+# Dump every table this script writes to, so an operator can diff against
+# REQUIRED_COLS after a Coolify upgrade.
 if (( CHECK_SCHEMA )); then
-    echo "=== users ===";      docker exec "$COOLIFY_DB_CONTAINER" psql -U "$COOLIFY_DB_USER" -d "$COOLIFY_DB_NAME" -c '\d users'
-    echo "=== teams ===";      docker exec "$COOLIFY_DB_CONTAINER" psql -U "$COOLIFY_DB_USER" -d "$COOLIFY_DB_NAME" -c '\d teams'
-    echo "=== team_user ==="; docker exec "$COOLIFY_DB_CONTAINER" psql -U "$COOLIFY_DB_USER" -d "$COOLIFY_DB_NAME" -c '\d team_user'
+    for tbl in users teams team_user servers server_settings standalone_dockers; do
+        echo "=== $tbl ==="
+        docker exec "$COOLIFY_DB_CONTAINER" psql -U "$COOLIFY_DB_USER" -d "$COOLIFY_DB_NAME" -c "\d $tbl"
+    done
     exit 0
 fi
 
@@ -125,11 +131,17 @@ fi
 
 version_status="untested"
 case "$COOLIFY_VERSION" in
-    ${KNOWN_GOOD_MAJOR_MINOR}.*) version_status="known-good" ;;
-    latest)                       version_status="floating tag — verify the running version elsewhere" ;;
+    latest) version_status="floating tag — verify the running version elsewhere" ;;
+    *)
+        for kg in $KNOWN_GOOD_MAJOR_MINORS; do
+            case "$COOLIFY_VERSION" in
+                ${kg}.*) version_status="known-good"; break ;;
+            esac
+        done
+        ;;
 esac
-printf '  Coolify version:  %s (%s; script proven against %s.x)\n' \
-    "$COOLIFY_VERSION" "$version_status" "$KNOWN_GOOD_MAJOR_MINOR"
+printf '  Coolify version:  %s (%s; script proven against %s)\n' \
+    "$COOLIFY_VERSION" "$version_status" "${KNOWN_GOOD_MAJOR_MINORS// /.x, }.x"
 
 # Check every table + every column we're about to INSERT into. If Coolify
 # renames or removes any of these on upgrade, abort loudly here rather than
