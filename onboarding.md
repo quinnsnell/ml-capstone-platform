@@ -70,6 +70,18 @@ ssh rigel 'cd ~/ml-capstone-platform && sudo ./scripts/provision-teams.sh --rost
 
 Each script runs preflight → plan → apply → verify. If any preflight fails, they abort cleanly without touching state. If verify fails, they exit non-zero so you notice.
 
+### 4. Smoke-test everything before handing off to students
+
+Run the verifier (also on rigel, read-only):
+
+```bash
+ssh rigel 'cd ~/ml-capstone-platform && ./scripts/verify-provisioning.sh --roster roster-2026-fall.csv'
+```
+
+Checks each roster row against both GitHub (org+team+membership) and Coolify's DB (users, teams, team_user, servers, server_settings has valid encrypted sentinel_token, standalone_dockers destination). Add `--verbose` for a per-check grouped block per person; default is a compact table. Exit non-zero if any row fails any check.
+
+The verifier also emits a **manual UI checklist** at the end — the impersonation walkthrough (sign into Coolify as super-admin, switch to each team, verify server-show page loads without a 500, walk the Application-create screens 1-3, delete throwaway Project) that can't be scripted since it needs a browser session. Do this once per team before turning students loose.
+
 ---
 
 ## What students do after the scripts run
