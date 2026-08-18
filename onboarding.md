@@ -26,8 +26,20 @@ Before you onboard anyone, verify the following are live (most of these were set
 
 Everything reads the same **roster CSV** with columns `team_name,email,name,github_username`. See `roster-example.csv` for the shape. Each script is idempotent — safe to re-run whenever the roster grows.
 
+> **All three scripts default to preview mode.** Running without `--apply` shows what it *would* do (per-row plan + rollup) without making any changes. Always run the preview first, sanity-check the plan, then re-run with `--apply` to execute. This is safer than dry-run flags on some tools because the preview is the *actual* SQL / API calls the apply will make — not an approximation.
+>
+> All three read the newest `roster-*.csv` in the current directory if you omit `--roster`. Explicit `--roster` is recommended when multiple rosters coexist.
+
+Rosters are gitignored except `roster-example.csv` (FERPA — real emails + GitHub usernames must never enter public git history). Keep them on rigel; `scp` from your laptop as needed.
+
 ### 1. Send GitHub org invitations
 
+Preview first:
+```bash
+./scripts/invite-to-org.sh --roster roster-2026-fall.csv
+```
+
+Sanity-check the plan (should show one line per row: `INVITE <gh_user>` or `SKIP (already member)`). Then apply for real:
 ```bash
 ./scripts/invite-to-org.sh --roster roster-2026-fall.csv --apply
 ```
@@ -36,8 +48,12 @@ Students receive an email and GitHub notification. They must accept before step 
 
 ### 2. Wait for acceptance, then create GitHub Teams
 
-Wait a day (or set a syllabus deadline: "accept the org invite by Friday"). Then:
+Wait a day (or set a syllabus deadline: "accept the org invite by Friday"). Then preview:
+```bash
+./scripts/provision-gh-teams.sh --roster roster-2026-fall.csv
+```
 
+Confirm each team's slug + expected member list. Then apply:
 ```bash
 ./scripts/provision-gh-teams.sh --roster roster-2026-fall.csv --apply
 ```
@@ -46,41 +62,67 @@ Creates one GitHub Team per unique `team_name` in the roster (slug = `slugify(te
 
 ### 3. Create Coolify teams, users, servers, destinations
 
-> **⚠ Do this first, once per term: run `--check-schema` before `--apply`.**
-> `provision-teams.sh` writes directly to Coolify's Postgres — 6 tables (users, teams, team_user, servers, server_settings, standalone_dockers). Coolify may have auto-updated its container tag past the `4.2.x` version this script was written against, and a schema change (column renamed / added-with-NOT-NULL / removed) will silently mis-provision teams. The `--check-schema` flag dumps the current DB layout so you can compare against what the script INSERTs into. **Run it every term** before the first `--apply`:
->
-> ```bash
-> ssh rigel 'cd ~/ml-capstone-platform && git pull && sudo ./scripts/provision-teams.sh --check-schema'
-> ```
->
-> If the preflight prints `Coolify version: X.Y.Z (untested; script proven against 4.2.x)`, stop and inspect the schema output before proceeding. If it prints `known-good`, you're safe to `--apply`.
+Runs on rigel — needs docker access to the `coolify-db` container. Add your user to the `docker` group once (`sudo usermod -aG docker snell` + re-login) so future runs don't need `sudo`. If your rigel `roster-*.csv` is out of date, `scp` it up first.
 
-Then run the real provisioning (on rigel — needs docker access to the coolify-db container):
+**Step 3a — schema check (once per term, or after Coolify auto-upgrades).** `provision-teams.sh` writes directly to Coolify's Postgres. Coolify may have auto-updated past the versions this script has been proven against, and a column rename/removal would silently mis-provision teams. Always run this first:
 
 ```bash
-ssh rigel 'cd ~/ml-capstone-platform && sudo ./scripts/provision-teams.sh --roster roster-2026-fall.csv --apply'
+ssh rigel 'cd ~/ml-capstone-platform && git pull && ./scripts/provision-teams.sh --check-schema'
 ```
 
-Or if you have `roster-*.csv` on your laptop but not rigel, `scp` it first:
+Look at the first line under `PREFLIGHT`. It prints one of:
+- `Coolify version: X.Y.Z (known-good; script proven against 4.2.x, 4.3.x)` → safe to proceed.
+- `Coolify version: X.Y.Z (untested; script proven against ...)` → **stop**. Diff the dumped table schemas against `REQUIRED_COLS` in `scripts/provision-teams.sh`. If all our columns are still present with compatible types, add the new minor to `KNOWN_GOOD_MAJOR_MINORS` and try again.
 
+**Step 3b — preview the roster provisioning:**
 ```bash
-scp roster-2026-fall.csv rigel:~/ml-capstone-platform/
-ssh rigel 'cd ~/ml-capstone-platform && sudo ./scripts/provision-teams.sh --roster roster-2026-fall.csv --apply'
+ssh rigel 'cd ~/ml-capstone-platform && ./scripts/provision-teams.sh --roster roster-2026-fall.csv'
 ```
 
-Each script runs preflight → plan → apply → verify. If any preflight fails, they abort cleanly without touching state. If verify fails, they exit non-zero so you notice.
+The per-row plan shows CREATE/EXISTS for each of the 6 tables (users, teams, team_user, servers, server_settings, standalone_dockers), plus a cleanup phase that deletes redundant auto-created personal teams for roster users. Add `--show-sql` to print the exact SQL that would run.
+
+**Step 3c — apply:**
+```bash
+ssh rigel 'cd ~/ml-capstone-platform && ./scripts/provision-teams.sh --roster roster-2026-fall.csv --apply'
+```
+
+The script runs preflight → plan → apply → verify in one transactional batch. If any preflight fails, it aborts cleanly without touching state. If the post-apply verify fails, it exits non-zero so you notice.
 
 ### 4. Smoke-test everything before handing off to students
 
-Run the verifier (also on rigel, read-only):
+Run the verifier on rigel (read-only, no `--apply` — it's a pure check):
 
 ```bash
 ssh rigel 'cd ~/ml-capstone-platform && ./scripts/verify-provisioning.sh --roster roster-2026-fall.csv'
 ```
 
-Checks each roster row against both GitHub (org+team+membership) and Coolify's DB (users, teams, team_user, servers, server_settings has valid encrypted sentinel_token, standalone_dockers destination). Add `--verbose` for a per-check grouped block per person; default is a compact table. Exit non-zero if any row fails any check.
+For each roster row it runs 9 checks against **both** GitHub and Coolify's DB:
 
-The verifier also emits a **manual UI checklist** at the end — the impersonation walkthrough (sign into Coolify as super-admin, switch to each team, verify server-show page loads without a 500, walk the Application-create screens 1-3, delete throwaway Project) that can't be scripted since it needs a browser session. Do this once per team before turning students loose.
+- **GitHub** — org membership, team exists, team membership
+- **Coolify DB** — users row, teams row, team_user pivot, `ml-capstone` server attached, `server_settings` has a valid encrypted `sentinel_token`, `standalone_dockers` destination on the `coolify` network
+
+Output modes:
+- default — compact one-line-per-row table (right for a full class)
+- `--verbose` — grouped block per person with each check labeled (right for a single row or when a row failed and you need detail)
+
+Exit code is 0 if every row passed every check; non-zero if any row missed any artifact.
+
+**Then walk the manual UI checklist the script prints at the end.** For each unique team it lists:
+
+1. Sign into `https://ml-capstone-admin.cs.byu.edu` as yourself, then temporarily add yourself to the team as an admin so the team switcher shows it (one-liner in the checklist output):
+   ```bash
+   docker exec -i coolify-db psql -U coolify -d coolify -c "INSERT INTO team_user (team_id, user_id, role, created_at, updated_at) SELECT t.id, u.id, 'admin', NOW(), NOW() FROM teams t, users u WHERE t.name = '<team_name>' AND u.email = '<your_email>' ON CONFLICT DO NOTHING;"
+   ```
+2. Refresh Coolify, switch to that team, and walk:
+   - **Servers → ml-capstone** — server-show page loads without a 500 (this is where the encrypted `sentinel_token` bug bit us; if this page renders, existing rows are compatible with the current Coolify version)
+   - **Projects → + New Project** (throwaway name) → into production env → **+ Add Resource → Private Repository (with GitHub App)** and confirm Screens 1-3: destination `coolify` pickable, source `byu-ml-capstone-coolify` pickable, org repos load including `hello-world-app`. Bail on Screen 4.
+   - Delete the throwaway Project (Danger Zone).
+3. Remove yourself from the team so it's clean for the student:
+   ```bash
+   docker exec -i coolify-db psql -U coolify -d coolify -c "DELETE FROM team_user WHERE team_id = (SELECT id FROM teams WHERE name='<team_name>') AND user_id = (SELECT id FROM users WHERE email='<your_email>');"
+   ```
+
+The UI walkthrough is manual because Coolify's Livewire pages need a real browser session — no CLI substitute exists. Once per unique team, before turning students loose.
 
 ---
 
