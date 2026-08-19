@@ -385,6 +385,41 @@ You now have a fresh repo at `github.com/byu-ml-capstone/<team-slug>-<app>` popu
 
 > **About the workflow:** your repo includes `.github/workflows/ci.yml` — this is the GitHub Actions workflow that runs your tests and triggers Coolify deploys. You don't need to write it (the template already has it), but you should understand it — Section 5 later in this guide walks through the file line by line. For now, just know that any push to `staging` or `main` triggers a workflow run that shows up in the Actions tab on your repo.
 
+**Clone the repo + smoke-test it locally.** Before wiring up Coolify, prove the template actually runs on your machine. This catches Docker/Python setup issues *now* — much easier to debug on your laptop than inside a failing deploy.
+
+```bash
+git clone https://github.com/byu-ml-capstone/<your-repo>.git
+cd <your-repo>
+git branch -a          # should list both main and staging
+```
+
+Run the unit tests (fast — no Docker, no network):
+
+```bash
+pip install -r requirements.txt
+pytest -v
+# 5 tests pass
+```
+
+Then build and run the container the same way Coolify will:
+
+```bash
+docker build -t hello-world-app .
+docker run --rm -p 8000:8000 hello-world-app
+```
+
+In another terminal, hit the endpoints:
+
+```bash
+curl http://127.0.0.1:8000/health
+# {"ok":true,"version":"0.1.1"}
+
+curl "http://127.0.0.1:8000/?lang=es"
+# {"hello":"Hola, mundo"}
+```
+
+Ctrl-C the container when done. If `docker build` fails or the endpoints don't respond, fix it here before moving on — a broken local build will also fail in Coolify, just with a slower feedback loop.
+
 **Finding your repo later:** org repos do NOT appear on your personal GitHub profile by default. To find yours:
 - **Bookmark it** — the URL is stable: `github.com/byu-ml-capstone/<your-repo>`
 - **Org page:** https://github.com/byu-ml-capstone lists every repo you have access to
