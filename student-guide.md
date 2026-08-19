@@ -48,7 +48,7 @@ Also make sure you have:
 Your instructor has already:
 
 - Provisioned you a **Coolify Team** on the classroom cluster (you'll see it after signing in)
-- Sent you an **invitation to the `byu-ml-capstone` GitHub organization** — accept it before Step 4 of the Setup section below
+- Sent you an **invitation to the `byu-ml-capstone` GitHub organization** — accept it before Step 1 of the Setup section below
 - Set up the shared **`byu-ml-capstone-coolify` GitHub App** and **`ml-capstone` deploy server** — nothing for you to install
 - Told you your **team slug** — a short name like `alice-sandbox` or `group-3` you'll use for both your GitHub repo name and your deploy domain (`<team-slug>.ml-capstone.cs.byu.edu`)
 
@@ -307,7 +307,7 @@ Open PR from `staging` into `main` → merge into `main`
 
 **What you (or your group) does:**
 
-- Accept the `byu-ml-capstone` org invite (see Setup Step 4) and create your class repo from the `hello-world-app` template
+- Accept the `byu-ml-capstone` org invite (see Setup Step 1) and create your class repo from the `hello-world-app` template
 - Sign into Coolify and set up your Applications — see **Setup: Sign in and create your Coolify Applications** below (one-time, ~15 min)
 - Write your app + Dockerfile + unit tests
 - Make your `/health` endpoint thorough enough to double as an automated smoke test (Section 4)
@@ -327,55 +327,26 @@ Real teams never merge straight into production. Staging exists to:
 
 This mirrors what you'll do at every serious tech company.
 
-## Setup: Sign in and create your Coolify Applications
+## Setup: Create your repo, then sign in and create your Coolify Applications
 
 **Do this once, before writing any code.** ~15 minutes.
 
+The Coolify UI lives at **https://ml-capstone-admin.cs.byu.edu** (VPN-only). But do NOT open it until after Step 1 — you need your class repo to exist first, since every Coolify Application is pointed at a GitHub repo.
+
 You'll:
 
-1. Sign into Coolify with your GitHub account
-2. Find your team and verify the `ml-capstone` server is attached
-3. Create a Project containing production + staging Environments
-4. Accept the `byu-ml-capstone` org invite + create your class repo from the `hello-world-app` template inside the org
+1. Accept the `byu-ml-capstone` org invite + create your class repo from the `hello-world-app` template inside the org (**with all branches**)
+2. Sign into Coolify at https://ml-capstone-admin.cs.byu.edu with your GitHub account
+3. Find your team and verify the `ml-capstone` server is attached
+4. Create a Project containing production + staging Environments
 5. Create one Application per Environment (both pointing at your class repo, different branches)
 6. Turn OFF Coolify's Auto Deploy so GitHub Actions drives deploys after tests pass
 7. Copy the Deploy Webhook URLs + create an API token, paste into GitHub Actions secrets
 8. Push a commit to verify the pipeline works end-to-end
 
-### 1. Sign in
+### 1. Accept the org invite + create your class repo under `byu-ml-capstone`
 
-Get on the BYU VPN, then open **https://ml-capstone-admin.cs.byu.edu** and click **"Sign in with GitHub"**.
-
-**No invite email.** Your instructor has added your email to the class roster ahead of time. When you sign in with GitHub, Coolify sees that your GitHub account's primary email matches the roster row and links you to your pre-provisioned team automatically. If you see "Registration is disabled. Please contact the administrator" after authorizing GitHub, the email on your GitHub account doesn't match the roster — tell your instructor which email to use.
-
-### 2. Find your team + verify the server
-
-In the sidebar (or top bar depending on version), click the team switcher. You should see your team (something like `Group 3` or `Alice Sandbox`) — pick it.
-
-**Why servers matter.** Every Application you create in Coolify has to be *deployed somewhere*. In cloud-PaaS terms, a "server" is a compute target — the physical or virtual machine that runs your containers. Your team already has one attached, called **`ml-capstone`**. Behind the scenes it's a shared physical box (`rigel.cs.byu.edu`, 4× A6000 GPUs) that hosts every team's containers — but the abstract name `ml-capstone` lets your instructor move workloads to different hardware later without changing anything you see.
-
-Left sidebar → **Servers**. You should see one server called **`ml-capstone`** with a green "reachable" indicator. That's all you need to check — you don't need to click into the server; the details page is admin-oriented. If the server is missing, tell the instructor before continuing.
-
-### 3. Create a Project + Environments
-
-Coolify's structure:
-
-```
-Team
-  └── Project (e.g., "sentiment-app")
-       ├── Environment "production"
-       │    └── Application (your app on the prod domain)
-       └── Environment "staging"
-            └── Application (your app on the staging domain)
-```
-
-- Sidebar → **Projects → + New Project**. Name it after your app (e.g., `sentiment-app`).
-- Coolify auto-drops you into the default `production` Environment after project creation — you'll see the *environment* page, not the project overview. That's expected, but the **+ New Environment** button lives on the *project* page one level up, not here.
-- **Click the project name in the breadcrumb at the top** (e.g., `sentiment-app`) to go back up to the project overview.
-- From the project overview → **+ New Environment** → name it `staging`.
-- You should now see both `production` and `staging` listed on the project page.
-
-### 4. Accept the org invite + create your class repo under `byu-ml-capstone`
+**Do this first — before opening Coolify.** Every Coolify Application you'll create in the later steps is pointed at a GitHub repo, so the repo has to exist first.
 
 Your instructor sent you an invitation to the **[byu-ml-capstone](https://github.com/byu-ml-capstone)** GitHub organization. **You must accept the invitation before you can create your repo inside the org.**
 
@@ -398,8 +369,17 @@ You'll create your class repo **inside the org**, not under your personal accoun
   - Group phase: `group-1-sentiment`, `group-3-recommender`
   - The alignment between repo name → team slug → deploy domain (`alice-sandbox.ml-capstone.cs.byu.edu`) keeps the mental model consistent as your project grows.
 - **Public** or **Private** — either works; Private is fine and matches production practice
-- ✅ **CHECK the box "Include all branches"**. The template ships with `main` AND `staging` branches; by default GitHub only copies `main`. Without this checkbox you'll need to create `staging` yourself later.
+- ✅ **CHECK the box "Include all branches"**. The template ships with `main` AND `staging` branches; by default GitHub only copies `main`. Without this checkbox you'll need to create `staging` yourself later, and the staging Coolify Application won't have a branch to track.
 - Click **Create repository from template**
+
+**Verify both branches copied over.** On your new repo's page, click the branch dropdown (top-left, above the file list) — you should see BOTH `main` and `staging` listed. If you only see `main`, you missed the "Include all branches" checkbox; delete the repo and redo the template step, OR recover by running:
+
+```bash
+git clone https://github.com/byu-ml-capstone/<your-repo>.git
+cd <your-repo>
+git checkout -b staging
+git push -u origin staging
+```
 
 You now have a fresh repo at `github.com/byu-ml-capstone/<team-slug>-<app>` populated with a minimal FastAPI (`/`, `/health`, `/languages`) and the 3-job CI/CD workflow. The `byu-ml-capstone-coolify` App already has access to it — no install step needed.
 
@@ -410,6 +390,39 @@ You now have a fresh repo at `github.com/byu-ml-capstone/<team-slug>-<app>` popu
 - **Org page:** https://github.com/byu-ml-capstone lists every repo you have access to
 - **Sidebar chip:** when you're signed in, GitHub shows the `byu-ml-capstone` avatar in the left sidebar of your dashboard — click it to jump to the org
 - **Pin it to your profile:** on your repo's page, hover the ⭐ area → the "..." menu offers "Pin repository" — pinned repos DO show on your public profile
+
+### 2. Sign in to Coolify
+
+Get on the BYU VPN, then open **https://ml-capstone-admin.cs.byu.edu** and click **"Sign in with GitHub"**.
+
+**No invite email.** Your instructor has added your email to the class roster ahead of time. When you sign in with GitHub, Coolify sees that your GitHub account's primary email matches the roster row and links you to your pre-provisioned team automatically. If you see "Registration is disabled. Please contact the administrator" after authorizing GitHub, the email on your GitHub account doesn't match the roster — tell your instructor which email to use.
+
+### 3. Find your team + verify the server
+
+In the sidebar (or top bar depending on version), click the team switcher. You should see your team (something like `Group 3` or `Alice Sandbox`) — pick it.
+
+**Why servers matter.** Every Application you create in Coolify has to be *deployed somewhere*. In cloud-PaaS terms, a "server" is a compute target — the physical or virtual machine that runs your containers. Your team already has one attached, called **`ml-capstone`**. Behind the scenes it's a shared physical box (`rigel.cs.byu.edu`, 4× A6000 GPUs) that hosts every team's containers — but the abstract name `ml-capstone` lets your instructor move workloads to different hardware later without changing anything you see.
+
+Left sidebar → **Servers**. You should see one server called **`ml-capstone`** with a green "reachable" indicator. That's all you need to check — you don't need to click into the server; the details page is admin-oriented. If the server is missing, tell the instructor before continuing.
+
+### 4. Create a Project + Environments
+
+Coolify's structure:
+
+```
+Team
+  └── Project (e.g., "sentiment-app")
+       ├── Environment "production"
+       │    └── Application (your app on the prod domain)
+       └── Environment "staging"
+            └── Application (your app on the staging domain)
+```
+
+- Sidebar → **Projects → + New Project**. Name it after your app (e.g., `sentiment-app`).
+- Coolify auto-drops you into the default `production` Environment after project creation — you'll see the *environment* page, not the project overview. That's expected, but the **+ New Environment** button lives on the *project* page one level up, not here.
+- **Click the project name in the breadcrumb at the top** (e.g., `sentiment-app`) to go back up to the project overview.
+- From the project overview → **+ New Environment** → name it `staging`.
+- You should now see both `production` and `staging` listed on the project page.
 
 ### 5. Create your production Application
 
@@ -449,7 +462,7 @@ On the General page:
 
 Navigate up to the project (breadcrumb at top) → click into the **staging** Environment → **+ Add Resource → Private Repository (with GitHub App)**. Same 4-screen flow as production. On Screen 4:
 
-- **Branch**: `staging` — the branch dropdown should include this option if you ticked "Include all branches" during Step 4's template flow. If it doesn't, you missed the checkbox; see the callout below.
+- **Branch**: `staging` — the branch dropdown should include this option if you ticked "Include all branches" during Step 1's template flow. If it doesn't, you missed the checkbox; see the callout below.
 - **Build Pack**: **Dockerfile** (same as production).
 - **Base Directory**: leave blank
 - **Port**: `8000` — Coolify does NOT copy this from your production Application; every Application defaults to port 3000. Overriding to 8000 is easy to forget and the deploy will look healthy but the domain returns "Bad Gateway".
@@ -542,7 +555,7 @@ cd <your-repo>
 git branch -a
 ```
 
-You should see both `main` and `staging` (assuming you ticked "Include all branches" in Step 4). If `staging` is missing:
+You should see both `main` and `staging` (assuming you ticked "Include all branches" in Step 1). If `staging` is missing:
 
 ```bash
 git checkout -b staging
@@ -1063,7 +1076,7 @@ Some Coolify configurations let you point liveness at `/ready` and the deep read
 
 ## Section 5: GitHub Actions — the 3-job pipeline
 
-**Your repo already has `.github/workflows/ci.yml`** — you inherited it from the `hello-world-app` template in Setup Step 4. This section walks through what it does so you understand the mechanics (and can modify it later). The current file looks like this:
+**Your repo already has `.github/workflows/ci.yml`** — you inherited it from the `hello-world-app` template in Setup Step 1. This section walks through what it does so you understand the mechanics (and can modify it later). The current file looks like this:
 
 ```yaml
 name: CI/CD
