@@ -50,11 +50,11 @@ Your instructor has already:
 - Provisioned you a **Coolify Team** on the classroom cluster (you'll see it after signing in)
 - Sent you an **invitation to the `byu-ml-capstone` GitHub organization** — accept it before Step 1 of the Setup section below
 - Set up the shared **`byu-ml-capstone-coolify` GitHub App** and **`ml-capstone` deploy server** — nothing for you to install
-- Told you your **team slug** — a short name like `alice-sandbox` or `group-3` you'll use for both your GitHub repo name and your deploy domain (`<team-slug>.ml-capstone.cs.byu.edu`)
+- Told you the **repo naming convention** — `<yourname>-<appname>` while you're working solo (e.g., `alice-sentiment`, `qsnell-hello-world`), or `<groupname>-<appname>` once you move to the group project (e.g., `group3-recommender`). Whatever you name your repo becomes your deploy hostname prefix — the wildcard DNS `*.ml-capstone.cs.byu.edu` covers anything you pick, so no assignment needed.
 
 All `*.ml-capstone.cs.byu.edu` subdomains resolve internally to the classroom cluster automatically — no `/etc/hosts` tweaking needed as long as you're on the CS VPN.
 
-If DNS resolution doesn't work when you're on VPN, verify with `nslookup <your-team-slug>.ml-capstone.cs.byu.edu` — it should return an internal `10.x.x.x` address. If it returns NXDOMAIN, your VPN's DNS resolver may be misconfigured; contact your instructor.
+If DNS resolution doesn't work when you're on VPN, verify with `nslookup <your-repo>.ml-capstone.cs.byu.edu` — it should return an internal `10.x.x.x` address. If it returns NXDOMAIN, your VPN's DNS resolver may be misconfigured; contact your instructor.
 
 ---
 
@@ -331,12 +331,10 @@ This mirrors what you'll do at every serious tech company.
 
 **Do this once, before writing any code.** ~15 minutes.
 
-The Coolify UI lives at **https://ml-capstone-admin.cs.byu.edu** (VPN-only). But do NOT open it until after Step 1 — you need your class repo to exist first, since every Coolify Application is pointed at a GitHub repo.
-
 You'll:
 
-1. Accept the `byu-ml-capstone` org invite + create your class repo from the `hello-world-app` template inside the org (**with all branches**)
-2. Sign into Coolify at https://ml-capstone-admin.cs.byu.edu with your GitHub account
+1. **On GitHub:** accept the `byu-ml-capstone` org invite + create your class repo from the `hello-world-app` template inside the org (**with all branches**)
+2. Sign in to Coolify with your GitHub account
 3. Find your team and verify the `ml-capstone` server is attached
 4. Create a Project containing production + staging Environments
 5. Create one Application per Environment (both pointing at your class repo, different branches)
@@ -364,10 +362,10 @@ You'll create your class repo **inside the org**, not under your personal accoun
 - Go to **https://github.com/byu-ml-capstone/hello-world-app**
 - Click the green **"Use this template"** button → **"Create a new repository"**
 - **Owner:** `byu-ml-capstone` (from the dropdown — NOT your personal account)
-- **Repository name:** follow the class convention **`<team-slug>-<app>`** where `<team-slug>` matches your Coolify team's URL slug and `<app>` describes the app. Examples:
-  - Individual sandbox phase: `alice-sandbox-hello`, `alice-sandbox-sentiment`
-  - Group phase: `group-1-sentiment`, `group-3-recommender`
-  - The alignment between repo name → team slug → deploy domain (`alice-sandbox.ml-capstone.cs.byu.edu`) keeps the mental model consistent as your project grows.
+- **Repository name:** follow the class convention **`<yourname>-<appname>`** for solo work, or **`<groupname>-<appname>`** once you move to the group project. Examples:
+  - Individual sandbox phase: `alice-hello`, `alice-sentiment`, `qsnell-hello-world`
+  - Group phase: `group1-sentiment`, `group3-recommender`
+  - Your repo name becomes your deploy hostname prefix (thanks to wildcard DNS at `*.ml-capstone.cs.byu.edu`) — e.g., repo `alice-sentiment` → prod at `http://alice-sentiment.ml-capstone.cs.byu.edu`. Pick something you'll want to see in URLs.
 - **Public** or **Private** — either works; Private is fine and matches production practice
 - ✅ **CHECK the box "Include all branches"**. The template ships with `main` AND `staging` branches; by default GitHub only copies `main`. Without this checkbox you'll need to create `staging` yourself later, and the staging Coolify Application won't have a branch to track.
 - Click **Create repository from template**
@@ -381,7 +379,7 @@ git checkout -b staging
 git push -u origin staging
 ```
 
-You now have a fresh repo at `github.com/byu-ml-capstone/<team-slug>-<app>` populated with a minimal FastAPI (`/`, `/health`, `/languages`) and the 3-job CI/CD workflow. The `byu-ml-capstone-coolify` App already has access to it — no install step needed.
+You now have a fresh repo at `github.com/byu-ml-capstone/<your-repo>` populated with a minimal FastAPI (`/`, `/health`, `/languages`) and the 3-job CI/CD workflow. The `byu-ml-capstone-coolify` App already has access to it — no install step needed.
 
 > **About the workflow:** your repo includes `.github/workflows/ci.yml` — this is the GitHub Actions workflow that runs your tests and triggers Coolify deploys. You don't need to write it (the template already has it), but you should understand it — Section 5 later in this guide walks through the file line by line. For now, just know that any push to `staging` or `main` triggers a workflow run that shows up in the Actions tab on your repo.
 
@@ -393,7 +391,7 @@ cd <your-repo>
 git branch -a          # should list both main and staging
 ```
 
-Run the unit tests (fast — no Docker, no network):
+Run the unit tests. These use FastAPI's `TestClient` to call the routes **in-process** — no Docker container, no HTTP socket, no network. They import `app` directly from `main.py` and hand it fake requests, so they're fast (<1s) and don't require the container to be running. The five tests in `tests/test_api.py` cover: default English greeting on `/`, the `?lang=es` Spanish variant, an unknown-language fallback, the `/languages` list, and `/health` returning `{"ok": true, ...}`.
 
 ```bash
 pip install -r requirements.txt
@@ -401,16 +399,17 @@ pytest -v
 # 5 tests pass
 ```
 
-Then build and run the container the same way Coolify will:
+Then build the image and start it detached — same terminal, no Ctrl-C dance. The container stays running so you can curl it freely.
+
+**Shortcut:** the template ships a `test-local.sh` script that does exactly the block below (build, run detached, wait for `/health`, curl a couple of endpoints, print the stop command). Run `./test-local.sh` if you'd rather not type it out. What it does under the hood:
 
 ```bash
-docker build -t hello-world-app .
-docker run --rm -p 8000:8000 hello-world-app
-```
+docker build -t hello-world-app:local .
 
-In another terminal, hit the endpoints:
+# Detached so this shell stays free; --rm auto-removes when you stop it
+docker run -d --rm --name hello-world-local -p 8000:8000 hello-world-app:local
+sleep 2                                        # give uvicorn a moment to bind
 
-```bash
 curl http://127.0.0.1:8000/health
 # {"ok":true,"version":"0.1.1"}
 
@@ -418,7 +417,13 @@ curl "http://127.0.0.1:8000/?lang=es"
 # {"hello":"Hola, mundo"}
 ```
 
-Ctrl-C the container when done. If `docker build` fails or the endpoints don't respond, fix it here before moving on — a broken local build will also fail in Coolify, just with a slower feedback loop.
+The container keeps running — try more curls (`?lang=de`, `?lang=fr`, `/languages`), tail its logs with `docker logs -f hello-world-local`, or just leave it up while you continue setup. When you're done experimenting:
+
+```bash
+docker stop hello-world-local                  # graceful shutdown; --rm cleans up
+```
+
+If `docker build` fails or the endpoints don't respond, fix it here before moving on — a broken local build will also fail in Coolify, just with a slower feedback loop.
 
 **Finding your repo later:** org repos do NOT appear on your personal GitHub profile by default. To find yours:
 - **Bookmark it** — the URL is stable: `github.com/byu-ml-capstone/<your-repo>`
@@ -434,7 +439,7 @@ Get on the BYU VPN, then open **https://ml-capstone-admin.cs.byu.edu** and click
 
 ### 3. Find your team + verify the server
 
-In the sidebar (or top bar depending on version), click the team switcher. You should see your team (something like `Group 3` or `Alice Sandbox`) — pick it.
+The team switcher lives at the top of the main panel — it looks like a breadcrumb, with small up/down arrows next to each segment. Click your team's segment and pick your team from the dropdown (something like `Group 3` or `Alice Sandbox`).
 
 **Why servers matter.** Every Application you create in Coolify has to be *deployed somewhere*. In cloud-PaaS terms, a "server" is a compute target — the physical or virtual machine that runs your containers. Your team already has one attached, called **`ml-capstone`**. Behind the scenes it's a shared physical box (`rigel.cs.byu.edu`, 4× A6000 GPUs) that hosts every team's containers — but the abstract name `ml-capstone` lets your instructor move workloads to different hardware later without changing anything you see.
 
@@ -474,7 +479,7 @@ Coolify's Application-create flow now walks you through four screens:
 
 **Screen 2 — Select a source.** Pick **`byu-ml-capstone-coolify`**. Coolify contacts GitHub and pulls the list of repos the App can see under the org.
 
-**Screen 3 — Select repository.** Pick your class repo (e.g., `byu-ml-capstone/<team-slug>-<app>`). Click **Load Repository** to fetch its branches.
+**Screen 3 — Select repository.** Pick your class repo (e.g., `byu-ml-capstone/<your-repo>`). Click **Load Repository** to fetch its branches.
 
 **Screen 4 — Configuration.** Fill in:
 
@@ -487,10 +492,10 @@ Coolify's Application-create flow now walks you through four screens:
 
 On the General page:
 
-- **Domain**: type your team's prod domain: `http://<team-slug>.ml-capstone.cs.byu.edu` (drop the auto-generated `.sslip.io` value if one appears). Your instructor gave you the slug. Example: Group 3 → `http://group-3.ml-capstone.cs.byu.edu`.
+- **Domain**: type `http://<your-repo>.ml-capstone.cs.byu.edu` (drop the auto-generated `.sslip.io` value if one appears). Use your actual repo name as the prefix — e.g., repo `alice-sentiment` → `http://alice-sentiment.ml-capstone.cs.byu.edu`. Wildcard DNS covers whatever you pick.
 - **Do NOT click "Generate Domain"** — that button produces a `.sslip.io` URL that can trigger a Coolify UI crash. Just type your domain in the field.
 
-> **Why HTTP not HTTPS?** The CS wildcard cert covers `*.cs.byu.edu` (one level only), so it doesn't cover the two-level `<team-slug>.ml-capstone.cs.byu.edu` your app lives at. Rather than have every student's browser scream "Not Secure," student apps serve over plain HTTP. Traffic is already encrypted at the VPN layer, so this is safe. A future upgrade to a two-level wildcard cert would make HTTPS work naturally.
+> **Why HTTP not HTTPS?** The CS wildcard cert covers `*.cs.byu.edu` (one level only), so it doesn't cover the two-level `<your-repo>.ml-capstone.cs.byu.edu` your app lives at. Rather than have every student's browser scream "Not Secure," student apps serve over plain HTTP. Traffic is already encrypted at the VPN layer, so this is safe. A future upgrade to a two-level wildcard cert would make HTTPS work naturally.
 - **Save** — do NOT click Deploy yet. Auto-deploy needs turning off (Step 7) before your first deploy fires.
 
 ### 6. Create your staging Application
@@ -516,7 +521,7 @@ Navigate up to the project (breadcrumb at top) → click into the **staging** En
 
 Then on the General page:
 
-- **Domain**: type `http://<team-slug>-staging.ml-capstone.cs.byu.edu` in the field (do NOT click "Generate Domain").
+- **Domain**: type `http://<your-repo>-staging.ml-capstone.cs.byu.edu` in the field (do NOT click "Generate Domain").
 - **Save** (don't deploy yet).
 
 ### 7. Turn OFF auto-deploy + configure GPU (Advanced tab)
@@ -601,8 +606,8 @@ git checkout main
 **Step A — Baseline: hit both live URLs to see the current state.**
 
 ```bash
-curl -s http://<team-slug>-staging.ml-capstone.cs.byu.edu/health && echo
-curl -s http://<team-slug>.ml-capstone.cs.byu.edu/health && echo
+curl -s http://<your-repo>-staging.ml-capstone.cs.byu.edu/health && echo
+curl -s http://<your-repo>.ml-capstone.cs.byu.edu/health && echo
 ```
 
 Both should return `{"ok":true,"version":"0.1.1"}`. That's the template's starting version — you're about to change it.
@@ -700,9 +705,9 @@ Open the Coolify staging Application → **Deployments** tab. New deployment app
 **Step H — Verify staging deployed. Prod should still be at 0.1.1.**
 
 ```bash
-curl -s http://<team-slug>-staging.ml-capstone.cs.byu.edu/health && echo
-curl -s "http://<team-slug>-staging.ml-capstone.cs.byu.edu/?lang=es" && echo
-curl -s http://<team-slug>.ml-capstone.cs.byu.edu/health && echo
+curl -s http://<your-repo>-staging.ml-capstone.cs.byu.edu/health && echo
+curl -s "http://<your-repo>-staging.ml-capstone.cs.byu.edu/?lang=es" && echo
+curl -s http://<your-repo>.ml-capstone.cs.byu.edu/health && echo
 ```
 
 Expected:
@@ -728,8 +733,8 @@ Watch Actions run again — this time `deploy-prod` fires instead of `deploy-sta
 **Step J — Verify prod deployed.**
 
 ```bash
-curl -s http://<team-slug>.ml-capstone.cs.byu.edu/health && echo
-curl -s "http://<team-slug>.ml-capstone.cs.byu.edu/?lang=es" && echo
+curl -s http://<your-repo>.ml-capstone.cs.byu.edu/health && echo
+curl -s "http://<your-repo>.ml-capstone.cs.byu.edu/?lang=es" && echo
 ```
 
 Both should now return the 0.1.2 responses. **Your entire pipeline is proven end-to-end.** Everything after this is code — you know how the mechanics work.
@@ -749,7 +754,7 @@ Both should now return the 0.1.2 responses. **Your entire pipeline is proven end
 
 **The trajectory:** you started from `hello-world-app` (2 endpoints, no ML). By the end of this section, you'll have grown it into an LLM-backed sentiment classifier — structurally like the reference `byu-ml-capstone/sentiment-test-app`, which you can peek at whenever you want to see "what does this look like when it's done?" You're not going to fork sentiment-test-app; you're going to *build up to it*, one file at a time, so you understand every piece.
 
-Same repo, same Applications, same domain as your hello-world deploy — you just replace the code inside your existing class repo (`byu-ml-capstone/<team-slug>-hello-world-app` or however you named it). Coolify redeploys on your next push automatically.
+Same repo, same Applications, same domain as your hello-world deploy — you just replace the code inside your existing class repo (`byu-ml-capstone/<your-repo>` or however you named it). Coolify redeploys on your next push automatically.
 
 ### 1a. Start from your existing repo (don't create a new one)
 
@@ -1236,7 +1241,7 @@ Watch:
 
 1. **GitHub Actions tab** → CI/CD workflow runs. Job graph shows `test` → `deploy-staging`.
 2. **Coolify UI** — your staging Application shows a new deployment.
-3. `curl http://<team-slug>-staging.ml-capstone.cs.byu.edu/health` returns your new `/health` JSON (VPN required).
+3. `curl http://<your-repo>-staging.ml-capstone.cs.byu.edu/health` returns your new `/health` JSON (VPN required).
 
 When staging looks good, promote to prod exactly like the Setup Step 11 walkthrough taught you — PR from `staging` into `main` (or merge locally + push), and `deploy-prod` fires.
 
@@ -1682,9 +1687,9 @@ These bypass LiteLLM, so you must change the *model name* in your client from `c
 | VPN gateway | `cs-vpn.byu.edu` (GlobalProtect client) |
 | Coolify admin UI | `https://ml-capstone-admin.cs.byu.edu` (VPN) |
 | GitHub org | `github.com/byu-ml-capstone` |
-| Your staging URL | `http://<team-slug>-staging.ml-capstone.cs.byu.edu` |
-| Your prod URL | `http://<team-slug>.ml-capstone.cs.byu.edu` |
-| Repo naming convention | `<team-slug>-<app>` under `byu-ml-capstone/` |
+| Your staging URL | `http://<your-repo>-staging.ml-capstone.cs.byu.edu` |
+| Your prod URL | `http://<your-repo>.ml-capstone.cs.byu.edu` |
+| Repo naming convention | `<your-repo>` under `byu-ml-capstone/` |
 | Container port your app must listen on | `8000` (matches Coolify's Port setting) |
 | Container bind address | `0.0.0.0` (not `127.0.0.1` — see Section 1e) |
 | GitHub Actions secrets you'll set | `COOLIFY_DEPLOY_WEBHOOK_STAGING`, `COOLIFY_DEPLOY_WEBHOOK_PROD`, `COOLIFY_API_TOKEN` |
