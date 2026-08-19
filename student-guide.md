@@ -1677,6 +1677,7 @@ Only ask for a GPU if you actually need one — most apps (web APIs, LLM proxies
 - **`COOLIFY_DEPLOY_WEBHOOK_STAGING` or `_PROD` secret missing or wrong** — Actions log will show a curl error.
 - **You pushed to a feature branch, not `staging` or `main`** — deploy jobs only run on those branches. Feature branches only run `test`.
 - **Deploy fires but Coolify marks it failed** — the `/health` endpoint is returning non-2xx. Check Coolify's deploy log; probably an LLM/env/dependency issue that only shows up in the deployed environment. Fix locally, push, retry.
+- **Coolify deploy log says `Bind for 0.0.0.0:8000 failed: port is already allocated`** — you're on the Docker Compose build pack and your `docker-compose.yaml` has `ports: "8000:8000"`. That binds host port 8000, and the shared cluster server only lets ONE container own each host port. Replace `ports:` with `expose: - "8000"` — Coolify + Traefik route the domain to your container over the internal `coolify` Docker network based on the Port field in Coolify's Application settings, so no host port binding is needed. (The `hello-world-app` template's `docker-compose.yaml` shows the correct pattern.)
 
 ## Deploy runs but app is unreachable
 
