@@ -337,10 +337,9 @@ You'll:
 2. Sign in to Coolify with your GitHub account
 3. Find your team and verify the `ml-capstone` server is attached
 4. Create a Project containing production + staging Environments
-5. Create one Application per Environment (both pointing at your class repo, different branches)
-6. Turn OFF Coolify's Auto Deploy so GitHub Actions drives deploys after tests pass
-7. Copy the Deploy Webhook URLs + create an API token, paste into GitHub Actions secrets
-8. Push a commit to verify the pipeline works end-to-end
+5. Create one Application per Environment (both pointing at your class repo, different branches). While creating each, set **Advanced → Deployment → "Manual deployments only"** so GitHub Actions can gate deploys behind tests. (Optional: enable GPU in the same Advanced tab if your app needs one.)
+6. Copy the Deploy Webhook URLs + create an API token, paste into GitHub Actions secrets
+7. Push a commit to verify the pipeline works end-to-end
 
 ### 1. Accept the org invite + create your class repo under `byu-ml-capstone`
 
@@ -439,7 +438,7 @@ Get on the BYU VPN, then open **https://ml-capstone-admin.cs.byu.edu** and click
 
 ### 3. Find your team + verify the server
 
-The team switcher lives at the top of the main panel — it looks like a breadcrumb, with small up/down arrows next to each segment. Click your team's segment and pick your team from the dropdown (something like `Group 3` or `Alice Sandbox`).
+The team switcher lives at the top of the main panel — it looks like a breadcrumb, with small up/down arrows next to each segment. Click your team's segment and pick your team from the dropdown (something like `Group 3` or `Alice Sandbox`). Initially, it will only have `Yourname Sandbox`
 
 **Why servers matter.** Every Application you create in Coolify has to be *deployed somewhere*. In cloud-PaaS terms, a "server" is a compute target — the physical or virtual machine that runs your containers. Your team already has one attached, called **`ml-capstone`**. Behind the scenes it's a shared physical box (`rigel.cs.byu.edu`, 4× A6000 GPUs) that hosts every team's containers — but the abstract name `ml-capstone` lets your instructor move workloads to different hardware later without changing anything you see.
 
@@ -468,45 +467,67 @@ Team
 
 Inside your project → click into the **production** Environment → **+ Add Resource**.
 
-You'll see several tiles. Click **Private Repository (with GitHub App)** — **NOT** the similarly-named "Private Repository (with Deploy Key)" tile. Those look almost identical but are completely different auth flows:
+You'll see several tiles. Click **GitHub Repo (with GitHub App)** — NOT the similarly-named "Git Repository (with Deploy Key)" tile. Same visual, completely different auth paths:
 
-- **Private Repository (with GitHub App)** ← this one — uses the `byu-ml-capstone-coolify` App the instructor set up. Correct choice.
-- **Private Repository (with Deploy Key)** ← *not* this — uses an SSH deploy key you'd have to paste into your repo yourself. Different auth path; won't pair with the App and will silently fail deploys.
+- **GitHub Repo (with GitHub App)** ← this one — uses the `byu-ml-capstone-coolify` App the instructor installed at the org level. Correct choice.
+- **Git Repository (with Deploy Key)** ← *not* this — expects an SSH deploy key you'd have to paste into your repo yourself. Won't pair with the App; deploys will silently fail.
 
-Coolify's Application-create flow now walks you through four screens:
+**Screen 1 — Choose a GitHub App.** Pick **`byu-ml-capstone-coolify`** (should be the only one — the instructor's org-level install).
 
-**Screen 1 — Select a destination.** Coolify wants to know which Docker network to run your container on. Pick **`coolify`** (should be the only option). This is the Docker network on the `ml-capstone` server your team owns.
+**Screen 2 — Select repository.** Coolify shows every repo the App can see under `byu-ml-capstone` — that list contains every student's repo, so **double-check you pick YOUR repo** (e.g., `byu-ml-capstone/<your-repo>`). Then click **Load Repository**.
 
-**Screen 2 — Select a source.** Pick **`byu-ml-capstone-coolify`**. Coolify contacts GitHub and pulls the list of repos the App can see under the org.
-
-**Screen 3 — Select repository.** Pick your class repo (e.g., `byu-ml-capstone/<your-repo>`). Click **Load Repository** to fetch its branches.
-
-**Screen 4 — Configuration.** Fill in:
+**Configuration panel** (appears underneath the repo selector once loaded):
 
 - **Branch**: `main`
 - **Build Pack**: **Dockerfile** — reads the `Dockerfile` at the repo root.
-- **Base Directory**: leave blank
-- **Port**: `8000` — matches the template's `EXPOSE 8000`
-- **Is it a static site?**: No
-- Click **Continue** — lands you on the Application's General page.
+- **Port**: `8000` — matches the template's `EXPOSE 8000`. This is the container port Traefik will route your domain to.
 
-On the General page:
+Click **Continue** — lands you on the Application's General page.
 
-- **Domain**: type `http://<your-repo>.ml-capstone.cs.byu.edu` (drop the auto-generated `.sslip.io` value if one appears). Use your actual repo name as the prefix — e.g., repo `alice-sentiment` → `http://alice-sentiment.ml-capstone.cs.byu.edu`. Wildcard DNS covers whatever you pick.
-- **Do NOT click "Generate Domain"** — that button produces a `.sslip.io` URL that can trigger a Coolify UI crash. Just type your domain in the field.
+> **Do you need to set Port Mappings?** No. Port Mappings (further down the General page) bind a specific *host* port to a container port — that's for apps you want to reach directly by port, bypassing the domain/Traefik path. Our setup routes by domain, so the **Port** field you already set is all that's needed.
+
+On the General page, top to bottom:
+
+- **Name**: Coolify auto-generates something ugly like `<your-repo>:main-<longhash>`. Rename it to something readable — e.g., `<your-repo>-prod`. This is only what you see in the Application list; doesn't affect the deploy.
+- **Save** the General page.
+
+**Now set the Domain.** Scroll down on the General page to the **Access** section and click the gear icon next to **"1 configured domain"** (or click the **Domains** tab in the Application's left tab bar — same page). Coolify has already auto-created a placeholder domain that looks like `<longhash>.<ip>.sslip.io` — that was Coolify's stopgap while you had no real domain configured. You'll replace it:
+
+- **Add a new domain**:
+  - **Protocol**: `http://`
+  - **Domain**: `<your-repo>.ml-capstone.cs.byu.edu` — use your actual repo name as the prefix (e.g., repo `alice-sentiment` → `alice-sentiment.ml-capstone.cs.byu.edu`). Wildcard DNS covers whatever you pick.
+  - **Port**: `8000` — matches the container's `EXPOSE 8000` from your Dockerfile.
+- **Delete the `<longhash>.sslip.io` placeholder** — you don't need it once you have a real domain.
+- **Delete `www.<your-repo>.ml-capstone.cs.byu.edu` if Coolify auto-added it** — it does that by default for public sites, but no one's going to type `www.` for a VPN-only internal app. Leaving it just clutters the Domains list.
+- **Do NOT click "Generate Domain"** — that button produces another `.sslip.io` URL and can trigger a Coolify UI crash.
+- **Save** the Domains configuration.
 
 > **Why HTTP not HTTPS?** The CS wildcard cert covers `*.cs.byu.edu` (one level only), so it doesn't cover the two-level `<your-repo>.ml-capstone.cs.byu.edu` your app lives at. Rather than have every student's browser scream "Not Secure," student apps serve over plain HTTP. Traffic is already encrypted at the VPN layer, so this is safe. A future upgrade to a two-level wildcard cert would make HTTPS work naturally.
-- **Save** — do NOT click Deploy yet. Auto-deploy needs turning off (Step 7) before your first deploy fires.
+
+Then click the **Advanced** tab:
+
+**Advanced → Deployment.** Two options; pick **Manual deployments only**.
+
+- **Deploy on push (webhooks)** — Coolify redeploys on every push to the tracked branch. Not what we want; GitHub Actions runs tests first and only fires the deploy webhook if they pass.
+- **Manual deployments only** ← this one. GitHub Actions will POST to Coolify's Deploy Webhook after tests pass; you shouldn't click the Deploy button by hand.
+
+**Advanced → GPU (optional, ML apps only).** `hello-world-app` doesn't use a GPU — skip this section for the pipeline demo. For apps that use ML models (sentiment-test-app, your own PyTorch/TF workload):
+
+- **Enable GPU** → ON
+- **GPU Driver** → `nvidia`
+- **GPU Count** → `1` (each container gets one A6000)
+- **GPU Device Ids** → your instructor may have assigned your team a specific GPU (`0`, `1`, `2`, or `3`) to spread load across the 4× A6000s on rigel. Set that here. If unset, Docker picks any available GPU.
+- **GPU Options** → leave blank
+
+> **Coolify save quirk:** the per-section **Save** buttons in the Advanced tab often DON'T persist changes on their own. After flipping settings, click back to the **General** tab and hit its **Save** button — that's what actually commits your Advanced changes. Verify by refreshing the Advanced tab and checking your settings stuck.
 
 ### 6. Create your staging Application
 
-Navigate up to the project (breadcrumb at top) → click into the **staging** Environment → **+ Add Resource → Private Repository (with GitHub App)**. Same 4-screen flow as production. On Screen 4:
+Navigate up to the project (breadcrumb at top) → click into the **staging** Environment → **+ Add Resource → GitHub Repo (with GitHub App)**. Same flow as production, with these differences in the configuration panel:
 
 - **Branch**: `staging` — the branch dropdown should include this option if you ticked "Include all branches" during Step 1's template flow. If it doesn't, you missed the checkbox; see the callout below.
 - **Build Pack**: **Dockerfile** (same as production).
-- **Base Directory**: leave blank
 - **Port**: `8000` — Coolify does NOT copy this from your production Application; every Application defaults to port 3000. Overriding to 8000 is easy to forget and the deploy will look healthy but the domain returns "Bad Gateway".
-- **Is it a static site?**: No
 
 > **If the `staging` branch dropdown is missing:** you skipped "Include all branches" when creating your repo. Recover on your laptop:
 >
@@ -517,49 +538,25 @@ Navigate up to the project (breadcrumb at top) → click into the **staging** En
 > git push -u origin staging
 > ```
 >
-> Then click the **Refresh Repository List** button in Coolify's picker (upper right of the source screen) and the `staging` branch should appear.
+> Then click the **Refresh Repository List** button in Coolify's picker and the `staging` branch should appear.
 
 Then on the General page:
 
-- **Domain**: type `http://<your-repo>-staging.ml-capstone.cs.byu.edu` in the field (do NOT click "Generate Domain").
-- **Save** (don't deploy yet).
+- **Name**: rename the auto-generated `<your-repo>:staging-<longhash>` to something readable like `<your-repo>-staging`. Save.
+- **Access → gear icon on "1 configured domain"** (or **Domains tab**): add a new domain — protocol `http://`, domain `<your-repo>-staging.ml-capstone.cs.byu.edu`, port `8000`. Delete the `<longhash>.sslip.io` placeholder and the `www.` variant if Coolify added it. Do NOT click "Generate Domain". Save.
 
-### 7. Turn OFF auto-deploy + configure GPU (Advanced tab)
+Then **Advanced → Deployment → Manual deployments only** (same as production). If your app needs a GPU, configure **Advanced → GPU** the same way — see the settings under Step 5. Remember the save quirk: commit Advanced changes by hitting Save on the **General** tab afterward.
 
-Both toggles live in the same place. In each Application (do this for BOTH staging and production):
-
-**Advanced tab → Deployment section:**
-
-- **Auto Deploy** → toggle **OFF**
-
-Coolify's default is "deploy on every push to the tracked branch." We don't want that — GitHub Actions runs your unit tests first, and only fires the Coolify deploy webhook if tests pass. Leaving Auto Deploy ON means every push deploys immediately without test-gating.
-
-**Advanced tab → GPU section (optional, ML apps only):**
-
-`hello-world-app` doesn't need a GPU — leave this section alone if you're just proving the pipeline works. Enable it when you deploy an app that uses ML models (sentiment-test-app, your own PyTorch/TF workload, etc.).
-
-When you DO need GPU:
-
-- **Enable GPU** → toggle **ON**
-- **GPU Driver** → `nvidia`
-- **GPU Count** → `1` (each container gets one A6000)
-- **GPU Device Ids** → your instructor may have assigned your team a specific GPU (e.g., `0`, `1`, `2`, or `3`) to spread load across the 4× A6000s on rigel. Set that here. If unset, Docker picks any available GPU.
-- **GPU Options** → leave blank
-
-**Coolify save quirk:** the per-section **Save** buttons in the Advanced tab often DON'T persist changes on their own. After flipping Auto Deploy / configuring GPU, click back to the **General** tab and hit its **Save** button — that's what actually commits your Advanced-tab changes. Verify by refreshing the Advanced tab and checking your toggles are still where you left them.
-
-Repeat for the other Application.
-  
-### 8. Grab the Deploy Webhook URLs (in Coolify)
+### 7. Grab the Deploy Webhook URLs (in Coolify)
 
 Each Coolify Application has a Deploy Webhook URL that triggers *just the container swap* (no auto-git-check). GitHub Actions will hit these.
 
 **Still in Coolify** (`https://ml-capstone-admin.cs.byu.edu`), for each of your two Applications:
 
 - Open the Application → left-tab bar → click **Webhooks** → find **Deploy Webhook** → copy the URL.
-- Note which one is staging and which is production. You'll paste these into GitHub secrets in Step 10 as `COOLIFY_DEPLOY_WEBHOOK_STAGING` and `COOLIFY_DEPLOY_WEBHOOK_PROD`. Paste them verbatim — no rewriting needed.
+- Note which one is staging and which is production. You'll paste these into GitHub secrets in Step 9 as `COOLIFY_DEPLOY_WEBHOOK_STAGING` and `COOLIFY_DEPLOY_WEBHOOK_PROD`. Paste them verbatim — no rewriting needed.
 
-### 9. Create a Coolify API token (in Coolify)
+### 8. Create a Coolify API token (in Coolify)
 
 The webhook is `deploy`-scoped by itself, but the GitHub Actions job needs a Bearer token to call it.
 
@@ -571,7 +568,7 @@ The webhook is `deploy`-scoped by itself, but the GitHub Actions job needs a Bea
 - **Permissions**: check `deploy` only (nothing more; least-privilege)
 - **Create** → copy the token immediately (Coolify shows it exactly once — if you lose it you'll have to make a new one).
 
-### 10. Add three secrets to your GitHub repo (in GitHub)
+### 9. Add three secrets to your GitHub repo (in GitHub)
 
 **Now switch back to GitHub.** Go to your class repo (e.g., `github.com/byu-ml-capstone/<your-repo>`) → **Settings** (repo settings, not org) → left sidebar **Secrets and variables → Actions → New repository secret**. Add all three:
 
@@ -583,7 +580,7 @@ The webhook is `deploy`-scoped by itself, but the GitHub Actions job needs a Bea
 
 Secret names match the ones used in the `sentiment-test-app` reference workflow so you can copy the workflow file as a template.
 
-### 11. Prove the pipeline: make a real code change (and see tests catch a bug)
+### 10. Prove the pipeline: make a real code change (and see tests catch a bug)
 
 You've configured everything. Time to make a real code change from your laptop and watch it flow through GitHub Actions → Coolify → your live URL. This walkthrough includes an intentional test failure — that's the point, and you'll see WHY the tests-gate-deploy pattern matters.
 
@@ -761,7 +758,7 @@ Same repo, same Applications, same domain as your hello-world deploy — you jus
 You already have a Coolify Application wired to your class repo. Reuse it — replace the code in your existing repo rather than creating a fresh one. That way the Deploy Webhook URLs, secrets, and domain all stay the same.
 
 ```bash
-cd path/to/<your-repo>          # wherever you cloned it during Setup Step 11
+cd path/to/<your-repo>          # wherever you cloned it during Setup Step 10
 git checkout staging
 # You'll make all the changes on staging, test them, then merge to main.
 ```
@@ -858,7 +855,7 @@ def gpu():
     config is right, `cuda_available` is true and `devices` lists the A6000(s)
     your container was granted. If `cuda_available` is false but you expect a
     GPU, the container isn't seeing one — check Coolify's Advanced → GPU
-    settings (Setup Step 7) and that torch was installed with CUDA support.
+    settings (Setup Steps 5–6) and that torch was installed with CUDA support.
     """
     info = {"torch_installed": False, "cuda_available": False, "devices": []}
     try:
@@ -1193,7 +1190,7 @@ jobs:
 
 - Only runs on pushes (not PRs) to the `staging` branch.
 - `needs: test` — if tests failed, this never fires. This is the tests-gate-deploy pattern; it's what protects prod from broken code.
-- Uses two secrets you configured in Setup Step 10: `COOLIFY_DEPLOY_WEBHOOK_STAGING` (the URL to POST to) and `COOLIFY_API_TOKEN` (the Bearer token in the Authorization header).
+- Uses two secrets you configured in Setup Step 9: `COOLIFY_DEPLOY_WEBHOOK_STAGING` (the URL to POST to) and `COOLIFY_API_TOKEN` (the Bearer token in the Authorization header).
 - The `curl -X POST` triggers Coolify to pull latest from the `staging` branch, rebuild the container, swap it in.
 
 **Job 3 — `deploy-prod`.**
@@ -1221,14 +1218,14 @@ Bigger changes (multi-repo builds, matrix testing, custom runners) — GitHub's 
 
 ### 5a. Verify your repo secrets are set
 
-You should already have three secrets set from Setup Step 10:
+You should already have three secrets set from Setup Step 9:
 `COOLIFY_DEPLOY_WEBHOOK_STAGING`, `COOLIFY_DEPLOY_WEBHOOK_PROD`, and
 `COOLIFY_API_TOKEN`. Confirm they're present at **GitHub repo → Settings →
-Secrets and variables → Actions**. Missing any of them → back to Setup Step 10.
+Secrets and variables → Actions**. Missing any of them → back to Setup Step 9.
 
 ### 5b. Push and watch the pipeline light up
 
-Your repo already has both `main` and `staging` branches (from the template) and the remote is already set (you cloned it in Setup Step 11). Push to `staging` first — you replaced hello-world's code with sentiment code, so this is a big change and staging is where big changes should land first:
+Your repo already has both `main` and `staging` branches (from the template) and the remote is already set (you cloned it in Setup Step 10). Push to `staging` first — you replaced hello-world's code with sentiment code, so this is a big change and staging is where big changes should land first:
 
 ```bash
 git checkout staging
@@ -1243,7 +1240,7 @@ Watch:
 2. **Coolify UI** — your staging Application shows a new deployment.
 3. `curl http://<your-repo>-staging.ml-capstone.cs.byu.edu/health` returns your new `/health` JSON (VPN required).
 
-When staging looks good, promote to prod exactly like the Setup Step 11 walkthrough taught you — PR from `staging` into `main` (or merge locally + push), and `deploy-prod` fires.
+When staging looks good, promote to prod exactly like the Setup Step 10 walkthrough taught you — PR from `staging` into `main` (or merge locally + push), and `deploy-prod` fires.
 
 ## Section 6: Your testing strategy — the three tiers
 
