@@ -549,11 +549,11 @@ Then **Advanced → Deployment → Manual deployments only** (same as production
 
 ### 7. Grab the Deploy Webhook URLs (in Coolify)
 
-Each Coolify Application has a Deploy Webhook URL that triggers *just the container swap* (no auto-git-check). GitHub Actions will hit these.
+Each Coolify Environment has a Deploy Webhook URL that triggers *just the container swap* (no auto-git-check). GitHub Actions will hit these.
 
-**Still in Coolify** (`https://ml-capstone-admin.cs.byu.edu`), for each of your two Applications:
+**Still in Coolify** (`https://ml-capstone-admin.cs.byu.edu`), for each of your two Environments:
 
-- Open the Application → left-tab bar → click **Webhooks** → find **Deploy Webhook** → copy the URL.
+- In the Environment Resource Settings pannel, click **Webhooks** → find **Deploy Webhook** → copy the URL into a notebook or something you can refer to later.
 - Note which one is staging and which is production. You'll paste these into GitHub secrets in Step 9 as `COOLIFY_DEPLOY_WEBHOOK_STAGING` and `COOLIFY_DEPLOY_WEBHOOK_PROD`. Paste them verbatim — no rewriting needed.
 
 ### 8. Create a Coolify API token (in Coolify)
@@ -563,10 +563,11 @@ The webhook is `deploy`-scoped by itself, but the GitHub Actions job needs a Bea
 **Still in Coolify** (not GitHub — Coolify has its own Keys & Tokens page):
 
 - Click the **Coolify** wordmark/logo top-left to go back to the instance dashboard
-- Left sidebar → **Keys & Tokens → API Tokens → + New Token**
+- Left sidebar → **Keys & Tokens → API Tokens**
 - **Description**: `github-actions`
 - **Permissions**: check `deploy` only (nothing more; least-privilege)
-- **Create** → copy the token immediately (Coolify shows it exactly once — if you lose it you'll have to make a new one).
+- **Expiresin**: select 1 year
+- **+ Create Token** → copy the token immediately (Coolify shows it exactly once — if you lose it you'll have to make a new one).
 
 ### 9. Add three secrets to your GitHub repo (in GitHub)
 
@@ -578,7 +579,7 @@ The webhook is `deploy`-scoped by itself, but the GitHub Actions job needs a Bea
 | `COOLIFY_DEPLOY_WEBHOOK_PROD` | Deploy Webhook URL from the production Application (paste verbatim from Coolify) |
 | `COOLIFY_API_TOKEN` | The `deploy`-scoped token you just created |
 
-Secret names match the ones used in the `sentiment-test-app` reference workflow so you can copy the workflow file as a template.
+Use these exact names — the `.github/workflows/ci.yml` file that shipped with the `hello-world-app` template already references them, so if you spell them right you won't have to edit the workflow.
 
 ### 10. Prove the pipeline: make a real code change (and see tests catch a bug)
 
@@ -600,36 +601,61 @@ git push -u origin staging
 git checkout main
 ```
 
-**Step A — Baseline: hit both live URLs to see the current state.**
+**Step A — First push: bump the version on `staging` to trigger your first deploy.**
 
-```bash
-curl -s http://<your-repo>-staging.ml-capstone.cs.byu.edu/health && echo
-curl -s http://<your-repo>.ml-capstone.cs.byu.edu/health && echo
-```
-
-Both should return `{"ok":true,"version":"0.1.1"}`. That's the template's starting version — you're about to change it.
-
-**Step B — Change the app's behavior on the `staging` branch.**
+Nothing has been deployed yet — you set Coolify to "Manual deployments only" and haven't pushed anything, so both live URLs currently return connection errors or a Coolify 404 page. This first push establishes the baseline: a clean version bump that passes tests and deploys.
 
 ```bash
 git checkout staging
 ```
 
-Open `greetings.py` in your editor (`code greetings.py`, `vim greetings.py`, etc.). Make TWO changes:
+Open `greetings.py` in your editor (`code greetings.py`, `vim greetings.py`, etc.). Find the version line and bump it:
 
-1. **Find the version line** and bump it:
+```python
+APP_VERSION = "0.1.1"    # change this
+APP_VERSION = "0.1.2"    # to this
+```
+
+Save. Commit + push:
+
+```bash
+git add greetings.py
+git commit -m "v0.1.2: initial staging deploy"
+git push
+```
+
+Open `https://github.com/byu-ml-capstone/<your-repo>/actions` in a browser. Watch:
+- **`test` job** — passes (~30s). A version bump doesn't break any tests.
+- **`deploy-staging` job** — fires the Coolify Deploy Webhook (~5s).
+
+Then flip to Coolify → your staging Application → **Deployments** tab. New deployment appears within ~10s: pull → build → healthcheck → healthy. Total ~30-60s end-to-end.
+
+Verify staging is live:
+
+```bash
+curl -s http://<your-repo>-staging.ml-capstone.cs.byu.edu/health && echo
+# {"ok":true,"version":"0.1.2"}
+```
+
+Prod hasn't been deployed yet (`curl http://<your-repo>.ml-capstone.cs.byu.edu/health` still errors) — you'll deploy prod at the end via the staging → main merge. That's how you always want prod to work: nothing goes there without going through staging first.
+
+**Step B — Second push: change the app's BEHAVIOR without updating the test.**
+
+Now demonstrate the tests-gate-deploy pattern. You'll change what the app *does* without updating the test that pins its behavior, and watch the pipeline block the deploy. Open `greetings.py` again and make TWO changes:
+
+1. **Bump the version** again:
    ```python
-   APP_VERSION = "0.1.1"    # change this
-   APP_VERSION = "0.1.2"    # to this
+   APP_VERSION = "0.1.2"    # change this
+   APP_VERSION = "0.1.3"    # to this
    ```
 
-2. **Find the Spanish greeting** in the `GREETINGS` dict and update it:
+2. **Change the Spanish greeting** in the `GREETINGS` dict:
    ```python
    "es": "Hola, mundo",                    # change this
    "es": "¡Buenos días, mundo!",            # to this
    ```
 
-Save the file. Verify your diff shows exactly two changes:
+Save. Verify your diff shows exactly two changes:
 
 ```bash
 git diff greetings.py
@@ -639,20 +665,20 @@ git diff greetings.py
 
 ```bash
 git add greetings.py
-git commit -m "v0.1.2: update Spanish greeting"
+git commit -m "v0.1.3: update Spanish greeting"
 git push
 ```
 
 **Step D — Watch GitHub Actions FAIL. This is correct behavior.**
 
-Open `https://github.com/byu-ml-capstone/<your-repo>/actions` in a browser. New workflow run appears within seconds. Watch:
+New workflow run appears in the Actions tab within seconds. Watch:
 
 - **`test` job** runs → **fails** with an AssertionError:
   ```
   test_hello_spanish
   AssertionError: assert {'hello': '¡Buenos días, mundo!'} == {'hello': 'Hola, mundo'}
   ```
-- **`deploy-staging` job** never runs — because the test failed, GitHub Actions skips it. Your staging URL still returns `0.1.1`.
+- **`deploy-staging` job** never runs — because the test failed, GitHub Actions skips it. Your staging URL still returns `0.1.2` (the version from your Step A deploy).
 
 **This is the whole point of the tests-gate-deploy pattern.** Your test asserted "the Spanish greeting must be `Hola, mundo`" — a contract. You changed the behavior without updating the contract. In production, you'd have shipped a lie. The test caught it BEFORE it went live.
 
@@ -685,7 +711,7 @@ All 5 tests should now pass locally.
 
 ```bash
 git add tests/test_api.py
-git commit -m "test: update Spanish assertion to match v0.1.2 greeting"
+git commit -m "test: update Spanish assertion to match v0.1.3 greeting"
 git push
 ```
 
@@ -699,7 +725,7 @@ New workflow run on GitHub Actions:
 
 Open the Coolify staging Application → **Deployments** tab. New deployment appears within ~10s: pull → build → healthcheck → healthy. Total ~30-60s.
 
-**Step H — Verify staging deployed. Prod should still be at 0.1.1.**
+**Step H — Verify staging deployed at 0.1.3. Prod still hasn't received its first deploy.**
 
 ```bash
 curl -s http://<your-repo>-staging.ml-capstone.cs.byu.edu/health && echo
@@ -709,12 +735,12 @@ curl -s http://<your-repo>.ml-capstone.cs.byu.edu/health && echo
 
 Expected:
 ```
-{"ok":true,"version":"0.1.2"}
+{"ok":true,"version":"0.1.3"}
 {"hello":"¡Buenos días, mundo!"}
-{"ok":true,"version":"0.1.1"}
+<connection error or Coolify 404 page — prod has never been deployed>
 ```
 
-Staging has the new behavior, prod hasn't been touched yet. This is exactly how a staging environment protects prod: you get to try changes in an environment that mirrors prod without customer impact.
+Staging has the new behavior; prod is untouched. This is exactly how a staging environment protects prod: you get to try changes in an environment that mirrors prod without customer impact. Now merge to main to fire prod's first deploy.
 
 **Step I — Promote staging → main (production).**
 
@@ -734,7 +760,7 @@ curl -s http://<your-repo>.ml-capstone.cs.byu.edu/health && echo
 curl -s "http://<your-repo>.ml-capstone.cs.byu.edu/?lang=es" && echo
 ```
 
-Both should now return the 0.1.2 responses. **Your entire pipeline is proven end-to-end.** Everything after this is code — you know how the mechanics work.
+Both should now return the 0.1.3 responses. **Your entire pipeline is proven end-to-end.** Everything after this is code — you know how the mechanics work.
 
 **Debugging failures during this walkthrough:**
 
