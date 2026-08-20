@@ -18,7 +18,7 @@ You can use either capability or both. This guide walks you through setting up e
 - **Part B — Deploying your app via CI/CD**
   - [The overall flow](#the-overall-flow) — architecture diagram + who does what
   - [Why staging + prod?](#why-staging--prod)
-  - [Setup: Sign in and create your Coolify Applications](#setup-sign-in-and-create-your-coolify-applications) — the 11-step onboarding lab
+  - [Setup: Create your repo, then sign in and create your Coolify Applications](#setup-create-your-repo-then-sign-in-and-create-your-coolify-applications) — the 10-step onboarding lab
   - [Section 1: Build your first deployable app](#section-1-build-your-first-deployable-app) — grow hello-world into a sentiment classifier
   - [Section 2: Test it locally](#section-2-test-it-locally)
   - [Section 3: Add tests](#section-3-add-tests)
@@ -308,7 +308,7 @@ Open PR from `staging` into `main` → merge into `main`
 **What you (or your group) does:**
 
 - Accept the `byu-ml-capstone` org invite (see Setup Step 1) and create your class repo from the `hello-world-app` template
-- Sign into Coolify and set up your Applications — see **Setup: Sign in and create your Coolify Applications** below (one-time, ~15 min)
+- Sign into Coolify and set up your Applications — see **Setup: Create your repo, then sign in and create your Coolify Applications** below (one-time, ~15 min)
 - Write your app + Dockerfile + unit tests
 - Make your `/health` endpoint thorough enough to double as an automated smoke test (Section 4)
 - The 3-job GitHub Actions workflow ships in the template — you just modify it as your app grows (Section 5)
@@ -390,39 +390,47 @@ cd <your-repo>
 git branch -a          # should list both main and staging
 ```
 
-Run the unit tests. These use FastAPI's `TestClient` to call the routes **in-process** — no Docker container, no HTTP socket, no network. They import `app` directly from `main.py` and hand it fake requests, so they're fast (<1s) and don't require the container to be running. The five tests in `tests/test_api.py` cover: default English greeting on `/`, the `?lang=es` Spanish variant, an unknown-language fallback, the `/languages` list, and `/health` returning `{"ok": true, ...}`.
+The template ships **two** services in one Docker Compose project (each in its own subdirectory):
+
+- `hello/` — the public FastAPI app on port 8000. This is what students grow into their real project.
+- `time/` — an internal sidecar on port 8001 that returns the current UTC time. Stand-in for a real database / cache / worker / model server. Only reachable from `hello`, never publicly.
+
+Compose starts both together. Only `hello` gets a public URL in production; `time` stays on the internal Docker network.
+
+Run the unit tests first. These use FastAPI's `TestClient` to call the routes **in-process** — no containers, no HTTP socket, no network. They import `app` directly from `hello/main.py` and hand it fake requests, so they're fast (<1s). The six tests in `hello/tests/test_api.py` cover default English on `/`, Spanish via `?lang=es`, an unknown-language fallback, `/languages`, `/health`, and a mocked `/time` call to the sidecar (mocked so the test doesn't need `time` running).
 
 ```bash
-pip install -r requirements.txt
-pytest -v
-# 5 tests pass
+pip install -r hello/requirements.txt httpx pytest
+cd hello && pytest -v
+# 6 tests pass
+cd ..
 ```
 
-Then build the image and start it detached — same terminal, no Ctrl-C dance. The container stays running so you can curl it freely.
-
-**Shortcut:** the template ships a `test-local.sh` script that does exactly the block below (build, run detached, wait for `/health`, curl a couple of endpoints, print the stop command). Run `./test-local.sh` if you'd rather not type it out. What it does under the hood:
+Then start both services detached via Docker Compose. **Shortcut:** the template ships a `test-local.sh` at the repo root that does exactly the block below (compose up + build, wait for `/health`, curl `/`, `/health`, `/time`, print the stop command). Run `./test-local.sh` if you'd rather not type it out. What it does under the hood:
 
 ```bash
-docker build -t hello-world-app:local .
+export SERVICE_FQDN_HELLO=http://localhost:8000   # stubs the compose interpolation
 
-# Detached so this shell stays free; --rm auto-removes when you stop it
-docker run -d --rm --name hello-world-local -p 8000:8000 hello-world-app:local
-sleep 2                                        # give uvicorn a moment to bind
+docker compose up -d --build                       # builds AND starts both hello + time
+sleep 3                                            # give both a moment to healthcheck
 
 curl http://127.0.0.1:8000/health
 # {"ok":true,"version":"0.1.1"}
 
 curl "http://127.0.0.1:8000/?lang=es"
 # {"hello":"Hola, mundo"}
+
+curl http://127.0.0.1:8000/time                    # proves hello -> time sidecar comms
+# {"from_time_service":{"utc":"..."}}
 ```
 
-The container keeps running — try more curls (`?lang=de`, `?lang=fr`, `/languages`), tail its logs with `docker logs -f hello-world-local`, or just leave it up while you continue setup. When you're done experimenting:
+Both containers keep running — try more curls (`?lang=de`, `?lang=fr`, `/languages`), tail logs with `docker compose logs -f`, or leave them up while you continue setup. When you're done:
 
 ```bash
-docker stop hello-world-local                  # graceful shutdown; --rm cleans up
+docker compose down                                # stops both services
 ```
 
-If `docker build` fails or the endpoints don't respond, fix it here before moving on — a broken local build will also fail in Coolify, just with a slower feedback loop.
+If `docker compose up` fails or the endpoints don't respond, fix it here before moving on — a broken local build will also fail in Coolify, just with a slower feedback loop.
 
 **Finding your repo later:** org repos do NOT appear on your personal GitHub profile by default. To find yours:
 - **Bookmark it** — the URL is stable: `github.com/byu-ml-capstone/<your-repo>`
@@ -609,7 +617,7 @@ Nothing has been deployed yet — you set Coolify to "Manual deployments only" a
 git checkout staging
 ```
 
-Open `greetings.py` in your editor (`code greetings.py`, `vim greetings.py`, etc.). Find the version line and bump it:
+Open `hello/greetings.py` in your editor (`code hello/greetings.py`, `vim hello/greetings.py`, etc.). Find the version line and bump it:
 
 ```python
 APP_VERSION = "0.1.1"    # change this
@@ -619,7 +627,7 @@ APP_VERSION = "0.1.2"    # to this
 Save. Commit + push:
 
 ```bash
-git add greetings.py
+git add hello/greetings.py
 git commit -m "v0.1.2: initial staging deploy"
 git push
 ```
@@ -641,7 +649,7 @@ Prod hasn't been deployed yet (`curl http://<your-repo>.ml-capstone.cs.byu.edu/h
 
 **Step B — Second push: change the app's BEHAVIOR without updating the test.**
 
-Now demonstrate the tests-gate-deploy pattern. You'll change what the app *does* without updating the test that pins its behavior, and watch the pipeline block the deploy. Open `greetings.py` again and make TWO changes:
+Now demonstrate the tests-gate-deploy pattern. You'll change what the app *does* without updating the test that pins its behavior, and watch the pipeline block the deploy. Open `hello/greetings.py` again and make TWO changes:
 
 1. **Bump the version** again:
    ```python
@@ -658,13 +666,13 @@ Now demonstrate the tests-gate-deploy pattern. You'll change what the app *does*
 Save. Verify your diff shows exactly two changes:
 
 ```bash
-git diff greetings.py
+git diff hello/greetings.py
 ```
 
 **Step C — Commit + push. Deliberately do NOT update the tests yet.**
 
 ```bash
-git add greetings.py
+git add hello/greetings.py
 git commit -m "v0.1.3: update Spanish greeting"
 git push
 ```
@@ -689,7 +697,7 @@ You now have two options:
 
 **Step E — Fix the test to match the new behavior.**
 
-Open `tests/test_api.py` in your editor. Find `test_hello_spanish`:
+Open `hello/tests/test_api.py` in your editor. Find `test_hello_spanish`:
 
 ```python
 def test_hello_spanish():
@@ -702,7 +710,7 @@ def test_hello_spanish():
 Save. Verify locally:
 
 ```bash
-python3 -m pytest tests/ -v
+cd hello && python3 -m pytest tests/ -v && cd ..
 ```
 
 All 5 tests should now pass locally.
@@ -710,7 +718,7 @@ All 5 tests should now pass locally.
 **Step F — Commit the test fix + push.**
 
 ```bash
-git add tests/test_api.py
+git add hello/tests/test_api.py
 git commit -m "test: update Spanish assertion to match v0.1.3 greeting"
 git push
 ```
@@ -791,9 +799,11 @@ git checkout staging
 
 ### 1b. Replace the code with a sentiment classifier
 
-You can delete `greetings.py`, `main.py`, and `tests/test_api.py` from the template — you'll replace them entirely with what's below. Keep `Dockerfile`, `docker-compose.yaml`, `requirements.txt`, `.github/workflows/ci.yml`, `conftest.py`. Those stay the same shape; only the code inside changes.
+You can delete `hello/greetings.py`, `hello/main.py`, and `hello/tests/test_api.py` from the template — you'll replace them entirely with what's below. Keep `hello/Dockerfile`, `hello/requirements.txt`, `hello/conftest.py`, and the repo-root orchestration files (`docker-compose.yaml`, `docker-compose.override.yml`, `.github/workflows/ci.yml`, `test-local.sh`). Those stay the same shape; only the code inside `hello/` changes.
 
-### 1c. Write `main.py`
+You can also delete the `time/` sidecar entirely if you don't need it — it's just a stand-in to demonstrate the multi-service pattern. If you delete it, remove the `time:` service and the `hello.depends_on.time` block from `docker-compose.yaml`, and drop the `/time` endpoint + its test from `hello/`. Or leave it as a reference for when you *do* want to add a real sidecar (Postgres, Redis, a local model server).
+
+### 1c. Write `hello/main.py`
 
 A FastAPI service with four endpoints:
 
@@ -1012,17 +1022,13 @@ Note the `.env` is **git-ignored** — never commit it, even though this file do
 
 ## Section 2: Test it locally
 
-Before adding tests or CI, make sure the app actually runs on your machine.
+Before adding tests or CI, make sure the app actually runs on your machine. Put your `.env` at the **repo root** (not inside `hello/`) — Docker Compose auto-picks up `.env` from the project root and the variables become available to all services.
 
 ```bash
-# Build the image
-docker build -t sentiment-app .
-
-# Run it, passing the .env file. --rm cleans up when you exit.
-docker run --rm -p 8000:8000 --env-file .env sentiment-app
+docker compose up -d --build   # builds hello/ (and any sidecars), starts detached
 ```
 
-In another terminal:
+In another terminal (or after a `sleep 3`):
 
 ```bash
 curl http://127.0.0.1:8000/health
@@ -1034,11 +1040,11 @@ curl -X POST http://127.0.0.1:8000/analyze \
 # {"text":"...","sentiment":"positive","confidence":0.98,"reasoning":"..."}
 ```
 
-You must be on VPN for the container to reach the LLM.
+You must be on VPN for the container to reach the LLM. Stop with `docker compose down` when done.
 
 ## Section 3: Add tests
 
-Create `tests/test_health.py`:
+Create `hello/tests/test_health.py`:
 
 ```python
 from fastapi.testclient import TestClient
@@ -1060,17 +1066,21 @@ def test_analyze_requires_text():
     assert r.status_code == 422  # pydantic validation error
 ```
 
-Add pytest to `requirements.txt`:
+`from main import app` works because `hello/conftest.py` marks `hello/` as pytest's rootdir — pytest auto-adds it to `sys.path`, so `main.py` is importable directly.
+
+Add pytest to `hello/requirements.txt`:
 
 ```
 pytest==8.3.4
 ```
 
-Run locally:
+Run locally from the `hello/` directory:
 
 ```bash
+cd hello
 pip install -r requirements.txt
 pytest -v
+cd ..
 ```
 
 Two tests pass. Note that we don't hit the real LLM in unit tests — that would fail in CI where there's no VPN. Real integration tests belong in a separate suite that only runs against a deployed instance.
@@ -1085,7 +1095,7 @@ Unit tests (Section 3) verify functions in isolation. Real integration tests —
 
 ### Extend `/health` to exercise the real dependencies
 
-Update `main.py` — replace the simple `/health` with a thorough version that actually calls the LLM:
+Update `hello/main.py` — replace the simple `/health` with a thorough version that actually calls the LLM:
 
 ```python
 @app.get("/health")
@@ -1170,9 +1180,9 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install dependencies
-        run: pip install fastapi 'uvicorn[standard]' pydantic httpx pytest
+        run: pip install -r hello/requirements.txt httpx pytest
       - name: Unit tests
-        run: pytest tests/ -v
+        run: cd hello && pytest tests/ -v
 
   # Job 2 — deploy to STAGING. Runs after tests pass, only on push to `staging`.
   # Coolify runs its /health check post-deploy; if /health fails, staging deploy fails.
@@ -1207,9 +1217,9 @@ jobs:
 **Job 1 — `test`.**
 
 - Runs on **every** push and PR, regardless of branch.
-- Installs Python + a minimal dependency set, runs `pytest tests/`.
-- The template's pip install is hand-listed to stay fast (`pip install fastapi 'uvicorn[standard]' pydantic httpx pytest`). Once you grow real dependencies, switch this to `pip install -r requirements.txt`.
-- Consider adding a `docker build .` step to catch Dockerfile bugs before deploy — cheap, and reveals problems that pip-installed pytest can't.
+- Installs Python + the `hello/` service's dependencies (`pip install -r hello/requirements.txt httpx pytest`), then runs `pytest` from inside `hello/`. `httpx` is added on top because FastAPI's `TestClient` needs it, and `pytest` because it's a dev-only tool that doesn't belong in the app's `requirements.txt`.
+- If you add more services with their own tests (e.g. a `time/tests/` directory), add another install + pytest step for each — same pattern.
+- Consider adding a `docker compose build` step to catch Dockerfile bugs before deploy — cheap, and reveals problems that pip-installed pytest can't.
 - Uses GitHub-hosted runners (Ubuntu) — public internet, so unit tests can't hit the VPN-only classroom LLM (and won't have a GPU either). Keep unit tests offline: mock the network call, use FastAPI dependency overrides, OR add an env-guarded short-circuit in your app so tests can skip the expensive path. The reference `sentiment-test-app` uses the latter pattern — its code checks `SKIP_LOCAL_MODEL=1` and skips loading the ~500 MB local HuggingFace pipeline during CI (see its `main.py` / `config.py`). Your own code has to opt in — the env var doesn't do anything unless you check it.
 
 **Job 2 — `deploy-staging`.**
@@ -1552,7 +1562,7 @@ git checkout -b add-emoji-endpoint
 ### Step 2 — Write code and unit tests locally
 
 ```bash
-# ... edit main.py, add tests/test_emoji.py, verify with pytest and docker locally
+# ... edit hello/main.py, add hello/tests/test_emoji.py, verify with pytest and docker locally
 pytest tests/ --ignore=tests/integration -v      # unit tests
 docker build -t sentiment-app .                  # verify Dockerfile
 ```

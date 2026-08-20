@@ -64,7 +64,7 @@ Check in order:
 
 Container is running but not reachable from Coolify's proxy. Most common causes:
 
-- App bound to `127.0.0.1` inside container instead of `0.0.0.0` — nothing outside the container can reach it. Fix in `main.py` / `uvicorn` command.
+- App bound to `127.0.0.1` inside container instead of `0.0.0.0` — nothing outside the container can reach it. Fix in `hello/main.py` / `uvicorn` command (or the equivalent path in your service's directory).
 - `EXPOSE` in Dockerfile doesn't match the port Coolify's config expects (usually 8000)
 - App crashed on startup — check Coolify's logs
 
