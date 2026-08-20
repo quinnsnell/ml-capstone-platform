@@ -29,6 +29,7 @@ You can use either capability or both. This guide walks you through setting up e
   - [Section 8: The day-to-day update–test–PR–deploy workflow](#section-8-the-day-to-day-updatetestprdeploy-workflow)
 - [Using the classroom LLM from inside your deployed app](#using-the-classroom-llm-from-inside-your-deployed-app)
 - [Using a GPU in your app](#using-a-gpu-in-your-app)
+- [Persistent storage (databases, uploaded files, anything stateful)](#persistent-storage-databases-uploaded-files-anything-stateful)
 - [Troubleshooting](#troubleshooting)
 - [Quick reference](#quick-reference)
 
@@ -390,29 +391,30 @@ cd <your-repo>
 git branch -a          # should list both main and staging
 ```
 
-The template ships **two** services in one Docker Compose project (each in its own subdirectory):
+The template ships **three** services in one Docker Compose project (each service self-contained in its own subdirectory):
 
 - `hello/` — the public FastAPI app on port 8000. This is what students grow into their real project.
-- `time/` — an internal sidecar on port 8001 that returns the current UTC time. Stand-in for a real database / cache / worker / model server. Only reachable from `hello`, never publicly.
+- `time/` — an internal FastAPI sidecar on port 8001 that returns the current UTC time. Stand-in for the kind of process you'd add later (a worker, a local model server, etc.). Reachable only from `hello`.
+- `db/` — an internal Postgres 16 database with a named-volume-backed data directory that survives restarts. Just an `init.sql` in the subdirectory; the container itself is the official `postgres:16-alpine` image.
 
-Compose starts both together. Only `hello` gets a public URL in production; `time` stays on the internal Docker network.
+Compose starts all three together. Only `hello` gets a public URL in production; `time` and `db` stay on the internal Docker network. The Postgres data lives on a named volume (`db-data`) that persists across `docker compose down` / redeploys / reboots — see the **Persistent storage** section later in this guide for the full story.
 
-Run the unit tests first. These use FastAPI's `TestClient` to call the routes **in-process** — no containers, no HTTP socket, no network. They import `app` directly from `hello/main.py` and hand it fake requests, so they're fast (<1s). The six tests in `hello/tests/test_api.py` cover default English on `/`, Spanish via `?lang=es`, an unknown-language fallback, `/languages`, `/health`, and a mocked `/time` call to the sidecar (mocked so the test doesn't need `time` running).
+Run the unit tests first. These use FastAPI's `TestClient` to call the routes **in-process** — no containers, no HTTP socket, no network. They import `app` directly from `hello/main.py` and hand it fake requests, so they're fast (<1s). The eight tests in `hello/tests/test_api.py` cover default English on `/`, Spanish via `?lang=es`, an unknown-language fallback, `/languages`, `/health`, a mocked `/time` call to the sidecar, and two mocked `/notes` tests against the DB. All boundaries are mocked so the tests don't need any container running.
 
 ```bash
 pip install -r hello/requirements.txt httpx pytest
 cd hello && pytest -v
-# 6 tests pass
+# 8 tests pass
 cd ..
 ```
 
-Then start both services detached via Docker Compose. **Shortcut:** the template ships a `test-local.sh` at the repo root that does exactly the block below (compose up + build, wait for `/health`, curl `/`, `/health`, `/time`, print the stop command). Run `./test-local.sh` if you'd rather not type it out. What it does under the hood:
+Then start all three services detached via Docker Compose. **Shortcut:** the template ships a `test-local.sh` at the repo root that does exactly the block below (compose up + build, wait for `/health`, curl `/`, `/health`, `/time`, POST + GET `/notes`, print the stop command). Run `./test-local.sh` if you'd rather not type it out. What it does under the hood:
 
 ```bash
 export SERVICE_FQDN_HELLO=http://localhost:8000   # stubs the compose interpolation
 
-docker compose up -d --build                       # builds AND starts both hello + time
-sleep 3                                            # give both a moment to healthcheck
+docker compose up -d --build                       # builds AND starts hello + time + db
+sleep 5                                            # first postgres boot takes a beat
 
 curl http://127.0.0.1:8000/health
 # {"ok":true,"version":"0.1.1"}
@@ -422,12 +424,22 @@ curl "http://127.0.0.1:8000/?lang=es"
 
 curl http://127.0.0.1:8000/time                    # proves hello -> time sidecar comms
 # {"from_time_service":{"utc":"..."}}
+
+curl -X POST http://127.0.0.1:8000/notes \
+  -H 'Content-Type: application/json' \
+  -d '{"body":"hello persistence"}'                # proves hello -> db round-trip
+# {"id":1,"body":"hello persistence","created_at":"..."}
+
+curl http://127.0.0.1:8000/notes                   # reads the row back from the db
+# [{"id":1,"body":"hello persistence","created_at":"..."}]
 ```
 
-Both containers keep running — try more curls (`?lang=de`, `?lang=fr`, `/languages`), tail logs with `docker compose logs -f`, or leave them up while you continue setup. When you're done:
+Containers keep running — try more curls (`?lang=de`, `?lang=fr`, `/languages`, more POSTs to `/notes`), tail logs with `docker compose logs -f`, or leave them up while you continue setup. When you're done:
 
 ```bash
-docker compose down                                # stops both services
+docker compose down                                # stops services; VOLUMES PERSIST
+# ...or...
+docker compose down -v                             # -v also wipes db-data (nuclear option)
 ```
 
 If `docker compose up` fails or the endpoints don't respond, fix it here before moving on — a broken local build will also fail in Coolify, just with a slower feedback loop.
@@ -1670,6 +1682,127 @@ services:
 GPUs are shared, first-come-first-served — one container per GPU. If all are taken, your deploy fails to start; ask on the class channel who's using them and coordinate.
 
 Only ask for a GPU if you actually need one — most apps (web APIs, LLM proxies, dashboards) don't.
+
+---
+
+# Persistent storage (databases, uploaded files, anything stateful)
+
+**The problem:** by default, everything a container writes to its own filesystem is lost the next time the container is recreated — and Coolify recreates the container on every deploy. If your app writes to a local SQLite file, or uploads land in `/app/uploads`, they're gone on the next push.
+
+**The fix:** Docker **named volumes**. Docker keeps them in its own managed storage on the host (`/var/lib/docker/volumes` on Linux). Mount a volume into the container at whatever path holds the data, and the data outlives the container.
+
+The template already demonstrates this with the `db` sidecar (Postgres). Same pattern works for any stateful service.
+
+## What the template ships
+
+`docker-compose.yaml` at the repo root has:
+
+```yaml
+services:
+  hello:
+    depends_on:
+      db:
+        condition: service_healthy      # hello only starts after db is up
+    environment:
+      - DATABASE_URL=postgresql://appuser:apppass@db:5432/appdb
+
+  db:
+    image: postgres:16-alpine           # official image, no Dockerfile needed
+    environment:
+      - POSTGRES_USER=appuser
+      - POSTGRES_PASSWORD=apppass
+      - POSTGRES_DB=appdb
+    volumes:
+      - db-data:/var/lib/postgresql/data                        # ← THE PERSISTENT BIT
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro   # ← schema on first boot
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  db-data:                             # named volume declaration
+```
+
+Two mounts on `db`:
+
+- **`db-data:/var/lib/postgresql/data`** — the Postgres data directory lives on a named volume Docker manages. Survives `docker compose down`, redeploys, image rebuilds, host reboots. **Only** removed by `docker compose down -v`, `docker volume rm`, or deleting the Application in Coolify with the "delete volumes" box checked.
+- **`./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro`** — bind-mount from the repo. The official Postgres image auto-executes any `*.sql` file in `/docker-entrypoint-initdb.d/` **only on first startup** (when the data directory is empty). On every subsequent restart the entrypoint sees existing data and skips it. That's exactly what makes the volume persistent: after first boot, the schema is in the volume; the SQL file is decorative from then on.
+
+## Prove it locally
+
+The best way to internalize this: watch data survive a full `down`/`up` cycle on your laptop.
+
+```bash
+# 1. Start everything and insert two rows
+./test-local.sh          # or: docker compose up -d --build
+
+curl -X POST http://127.0.0.1:8000/notes \
+  -H 'Content-Type: application/json' -d '{"body":"first"}'
+curl -X POST http://127.0.0.1:8000/notes \
+  -H 'Content-Type: application/json' -d '{"body":"second"}'
+
+curl http://127.0.0.1:8000/notes
+# [{"id":1,"body":"first",...}, {"id":2,"body":"second",...}]
+
+# 2. Take everything down. Containers gone. Volume stays.
+docker compose down
+docker volume ls | grep db-data
+# hello-world-app_db-data          <-- still there
+
+# 3. Bring it back up
+docker compose up -d
+sleep 5
+
+# 4. Rows are still there
+curl http://127.0.0.1:8000/notes
+# [{"id":1,"body":"first",...}, {"id":2,"body":"second",...}]
+
+# 5. Nuclear option — the -v flag deletes volumes
+docker compose down -v
+docker compose up -d
+sleep 5
+
+curl http://127.0.0.1:8000/notes
+# []       <-- data gone, init.sql re-ran, empty table
+```
+
+That five-step cycle is the mental model. Deploys are equivalent to `down`/`up` at the container level, so **your data survives deploys** the same way it survived `docker compose down` here.
+
+## How Coolify handles this
+
+Good news: **nothing to configure**. If your `docker-compose.yaml` declares a named volume, Coolify creates it on first deploy and reuses it forever after.
+
+- **Volumes tab in Coolify UI.** Open your Application → **Storages** (or **Persistent Storage** depending on version) tab. You'll see the named volumes Coolify allocated, with their host paths. Useful for confirming the volume exists and inspecting size; you rarely edit anything here for a Compose build pack (declare in the compose file instead).
+- **Staging and prod are isolated.** Your staging Application and your prod Application are two different Coolify Applications → they each get their own `db-data` volume on rigel. They do NOT share data. **This is the correct default** — you never want staging test data mixed with prod user data.
+- **Deploys don't touch the volume.** On every push-to-deploy Coolify runs `docker compose down && docker compose up -d --build`. The container is recreated with the new image; the volume mount attaches to the same on-disk data. Zero data loss.
+- **Removing an Application.** If you delete an Application in Coolify's UI, you'll be asked whether to also delete its volumes. Uncheck that box and the data survives — you can point a new Application at the same volume later.
+
+## Moving data between environments
+
+Since staging and prod don't share volumes, there's no automatic promotion of data from staging to prod (or backfill from prod to staging). If you actually need this — e.g., copy a snapshot of prod data into staging so you can test against real-shaped data — use `pg_dump` and `psql`:
+
+```bash
+# On rigel (or wherever prod runs), dump the prod db:
+docker compose exec db pg_dump -U appuser appdb > prod-snapshot.sql
+
+# Copy the dump wherever you'll restore it. On the staging deploy host:
+cat prod-snapshot.sql | docker compose exec -T db psql -U appuser appdb
+```
+
+Do NOT try to share a volume between two Applications by hand — you'd have both environments writing to the same rows and no way to reason about state.
+
+## Backups (or: why this matters less for class projects)
+
+Named volumes live on rigel's disk. If rigel dies, they're gone unless someone has a backup running elsewhere. **The class cluster does not currently back up student volumes.** For your class project this is fine — worst case you re-seed the database with `init.sql`. For real production data at a real company, you'd run a nightly `pg_dump` job that ships to S3 / rclone / whatever.
+
+## Common gotchas
+
+- **`init.sql` doesn't re-run after first boot.** Change the schema and re-push? Nothing happens — Postgres sees the existing data directory. Either `docker compose down -v` locally (blows the data away) or write a proper migration and run it against the live db.
+- **Schema mismatches after code changes.** If your app expects a column that doesn't exist in the persisted volume, you'll get errors on POST/GET. Same fix as above.
+- **Wrong volume-vs-bind-mount syntax.** `db-data:/path` (no leading `./` or `/`) → named volume, managed by Docker. `./db/init.sql:/path:ro` → bind-mount from the repo, read-only. Mixing them up gives silent failures.
+- **`docker compose down -v` in production.** Never run this by hand on rigel unless you actually want to lose the data. Coolify does NOT pass `-v` when it redeploys; it's a footgun for humans.
+- **Coolify's `docker compose down` cleanup on redeploy.** Coolify's redeploy runs `docker compose down && docker compose up -d --build` without `-v`, so volumes always persist across deploys. Confirmed live on ml-capstone.
 
 ---
 
