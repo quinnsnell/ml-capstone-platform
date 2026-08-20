@@ -408,7 +408,7 @@ cd hello && pytest -v
 cd ..
 ```
 
-Then start all three services detached via Docker Compose. **Shortcut:** the template ships a `test-local.sh` at the repo root that does exactly the block below (compose up + build, wait for `/health`, curl `/`, `/health`, `/time`, POST + GET `/notes`, print the stop command). Run `./test-local.sh` if you'd rather not type it out. What it does under the hood:
+Then start all three services detached via Docker Compose. **Shortcut:** the template ships a `smoke-test.sh` at the repo root that does exactly the block below (compose up + build, wait for `/health`, curl `/`, `/health`, `/time`, POST + GET `/notes`, print the stop command). Run `./smoke-test.sh` if you'd rather not type it out. The same script accepts an optional URL argument (`./smoke-test.sh http://<your-repo>-staging.ml-capstone.cs.byu.edu`) to smoke-test a deployed instance without touching local Docker — handy after a Coolify deploy. What the local flavor does under the hood:
 
 ```bash
 export SERVICE_FQDN_HELLO=http://localhost:8000   # stubs the compose interpolation
@@ -811,7 +811,7 @@ git checkout staging
 
 ### 1b. Replace the code with a sentiment classifier
 
-You can delete `hello/greetings.py`, `hello/main.py`, and `hello/tests/test_api.py` from the template — you'll replace them entirely with what's below. Keep `hello/Dockerfile`, `hello/requirements.txt`, `hello/conftest.py`, and the repo-root orchestration files (`docker-compose.yaml`, `docker-compose.override.yml`, `.github/workflows/ci.yml`, `test-local.sh`). Those stay the same shape; only the code inside `hello/` changes.
+You can delete `hello/greetings.py`, `hello/main.py`, and `hello/tests/test_api.py` from the template — you'll replace them entirely with what's below. Keep `hello/Dockerfile`, `hello/requirements.txt`, `hello/conftest.py`, and the repo-root orchestration files (`docker-compose.yaml`, `docker-compose.override.yml`, `.github/workflows/ci.yml`, `smoke-test.sh`). Those stay the same shape; only the code inside `hello/` changes.
 
 You can also delete the `time/` sidecar entirely if you don't need it — it's just a stand-in to demonstrate the multi-service pattern. If you delete it, remove the `time:` service and the `hello.depends_on.time` block from `docker-compose.yaml`, and drop the `/time` endpoint + its test from `hello/`. Or leave it as a reference for when you *do* want to add a real sidecar (Postgres, Redis, a local model server).
 
@@ -1298,19 +1298,27 @@ You now have a working pipeline. That raises a real question: *"how do I actuall
 
 | Tier | Tool | When | Scope | Reachable from |
 |---|---|---|---|---|
-| **Pre-push** | `./test-local.sh` | Before every `git push` | One app | Your laptop |
+| **Pre-push** | `./smoke-test.sh` | Before every `git push` | One app | Your laptop |
 | **Deploy gate** | Coolify's `/health` check | After each deploy, gates the swap | One app, against real prod dependencies | Coolify itself, on rigel |
 | **Integration** | `./integration-test.sh` | After staging deploys, before merging to prod | One app, against live deployed URL, with real data + edge cases | Your laptop |
 
 There's also a cluster-wide `smoke-test-cluster.sh` your instructor runs to check whole-cluster health — you don't need it day-to-day.
 
-### Tier 1 — Pre-push local (`test-local.sh`)
+### Tier 1 — Pre-push local (`smoke-test.sh`)
 
 Runs on your laptop. Builds the container from your current code, starts it, runs the `pytest` suite inside the container, hits every endpoint. Catches syntax errors, broken imports, obvious logic bugs, and "did I forget to update the Dockerfile" mistakes before you push code that would fail in CI.
 
 Fast feedback loop: green here means you're safe to push. Roughly 30 seconds after the initial image is built.
 
-**Limits:** doesn't test against real infrastructure — the `/health` and `/analyze` endpoints hit the classroom LiteLLM, but everything is running locally on your Mac. Bugs that only appear in the Coolify environment (env vars, GPU allocation, networking) can slip through.
+**Also works against a deployed URL** — same script, but pass the deployed base URL as an argument. Skips the docker compose steps and just curls the endpoints:
+
+```bash
+./smoke-test.sh http://<your-repo>-staging.ml-capstone.cs.byu.edu
+```
+
+Nice for a quick sanity check right after a Coolify deploy: "did the endpoints actually come up on the live URL?" Same script, so what passes locally should pass remotely; if it doesn't, you've found a bug that only appears in the Coolify environment.
+
+**Limits:** doesn't test against real infrastructure — the `/health` and `/analyze` endpoints hit the classroom LiteLLM, but everything is running locally on your Mac. Bugs that only appear in the Coolify environment (env vars, GPU allocation, networking) can slip through — running the same script with a remote URL after the deploy catches most of those.
 
 ### Tier 2 — Deploy gate (Coolify's `/health` check)
 
@@ -1384,7 +1392,7 @@ Until then, running `integration-test.sh` before opening the PR from staging →
 
 ### Where each tier catches what
 
-| Bug type | Tier 1 (`test-local`) | Tier 2 (`/health`) | Tier 3 (`integration-test`) |
+| Bug type | Tier 1 (`smoke-test`) | Tier 2 (`/health`) | Tier 3 (`integration-test`) |
 |---|---|---|---|
 | Syntax error, import bug | ✅ | (would never deploy) | (would never deploy) |
 | Broken endpoint URL | ✅ | ✅ | ✅ |
@@ -1546,7 +1554,7 @@ For completeness, this isn't the only way. Real production ML systems also use:
 
 **Persistent volume mount.** Mount the model weights from a shared filesystem at runtime instead of baking them into the image. Image stays tiny; container startup does the loading. Trade-off: needs a persistent-volume system (Kubernetes PV, NFS, etc.) — Coolify doesn't do this out of the box.
 
-**Just accept slow deploys, invest in local testing.** If deploys are infrequent (like a weekly release), the 5-minute cycle doesn't matter much. Put your effort into a fast local dev loop (`test-local.sh` in this pattern) so you rarely need to deploy.
+**Just accept slow deploys, invest in local testing.** If deploys are infrequent (like a weekly release), the 5-minute cycle doesn't matter much. Put your effort into a fast local dev loop (`smoke-test.sh` in this pattern) so you rarely need to deploy.
 
 ### The full worked example
 
@@ -1789,7 +1797,7 @@ The best way to internalize this: watch data survive a full `down`/`up` cycle on
 
 ```bash
 # 1. Start everything and insert two rows
-./test-local.sh          # or: docker compose up -d --build
+./smoke-test.sh          # or: docker compose up -d --build
 
 curl -X POST http://127.0.0.1:8000/notes \
   -H 'Content-Type: application/json' -d '{"body":"first"}'
@@ -1949,7 +1957,7 @@ Adding a schema change is a coordinated four-file edit: **new migration file + D
 
 **Step 1: baseline — confirm the current schema.**
 
-Deploy the template (or run `./test-local.sh`), then:
+Deploy the template (or run `./smoke-test.sh`), then:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/notes \
@@ -2061,7 +2069,7 @@ Run `cd hello && pytest -v` and verify green before you push. This is the tests-
 
 **Step 6: deploy and watch the migration fire.**
 
-Locally: `./test-local.sh` or `docker compose up -d --build`. In production: push to staging → Coolify redeploys.
+Locally: `./smoke-test.sh` or `docker compose up -d --build`. In production: push to staging → Coolify redeploys.
 
 Watch the hello container's logs during startup:
 
