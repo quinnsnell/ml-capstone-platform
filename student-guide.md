@@ -399,12 +399,12 @@ The template ships **three** services in one Docker Compose project (each servic
 
 Compose starts all three together. Only `hello` gets a public URL in production; `time` and `db` stay on the internal Docker network. The Postgres data lives on a named volume (`db-data`) that persists across `docker compose down` / redeploys / reboots — see the **Persistent storage** section later in this guide for the full story.
 
-Run the unit tests first. These use FastAPI's `TestClient` to call the routes **in-process** — no containers, no HTTP socket, no network. They import `app` directly from `hello/main.py` and hand it fake requests, so they're fast (<1s). The twelve tests in `hello/tests/test_api.py` cover the greeting endpoints (`/`, `/languages`, `/health`), a mocked `/time` call to the sidecar, three `/notes` tests that mock the `NotesDAO` (list, insert, and 503-on-db-outage), and three `/admin/reset` tests (403 when disabled, calls DAO when enabled, 503 on db outage). All boundaries are mocked so the tests don't need any container running.
+Run the unit tests first. These use FastAPI's `TestClient` to call the routes **in-process** — no containers, no HTTP socket, no network. They import `app` directly from `hello/main.py` and hand it fake requests, so they're fast (<1s). The thirteen tests in `hello/tests/test_api.py` cover the greeting endpoints (`/`, `/languages`, `/health`), a mocked `/time` call to the sidecar, four `/notes` tests that mock the `NotesDAO` (list, insert-with-priority, insert-default-priority, and 503-on-db-outage), and three `/admin/reset` tests (403 when disabled, calls DAO when enabled, 503 on db outage). All boundaries are mocked so the tests don't need any container running.
 
 ```bash
 pip install -r hello/requirements.txt httpx pytest
 cd hello && pytest -v
-# 12 tests pass
+# 13 tests pass
 cd ..
 ```
 
@@ -1873,133 +1873,115 @@ Nuke the volume. Coolify's UI hides volume-delete for auto-declared compose volu
 
 For everyday schema iteration, prefer Scenario 1's `/admin/reset` — no SSH, no Coolify Application juggling.
 
-## Evolving the schema (migrations + maintenance)
+## Evolving the schema (migrations)
 
-Every real app changes its schema over time: add a column, add a table, backfill data, drop a stale index. "SSH to the DB machine and run `psql`" is the classic maintenance workflow — that translates here to **`docker exec` into the db container and run `psql` from there**, since the DB is a container on rigel that isn't directly reachable from your laptop.
+Every real app changes its schema over time: add a column, add a table, drop a stale index. The template ships a small migration system so students can do this the way real teams do — commit a numbered SQL file to git, and the app applies it automatically on the next deploy.
 
-Three tools cover the full range of what you'll need. Pick based on the change, not the tool you like:
+### How the runner works
 
-| Change type | Tool | Where you edit / run |
-|---|---|---|
-| Additive (new table, new column with default) | `notes_dao.ensure_schema()` | Edit `hello/notes_dao.py`, push, redeploy — runs automatically |
-| One-off / destructive (rename, drop, backfill, index tuning) | `psql` in the db container | Interactive `docker exec` from Coolify Terminal, SSH to rigel, or local `docker compose exec` |
-| Team-scale (multiple contributors, up/down migrations, version tracking) | Alembic (or similar) | Migration files in `hello/migrations/`, versioned in git |
+`hello/notes_dao.py` has an `apply_migrations()` method that runs on every app startup (via the lifespan hook in `hello/main.py`):
 
-### Everyday additive changes (edit `ensure_schema` and push)
+1. Ensures a `_migrations` tracking table exists in the db.
+2. Reads the list of already-applied migration filenames from that table.
+3. Globs `hello/migrations/*.sql`, sorts alphabetically.
+4. For each file NOT in the applied list: opens a transaction, executes the SQL, inserts the filename into `_migrations`, commits. If the SQL fails, the whole transaction rolls back and the filename is NOT recorded — so a broken migration doesn't get skipped on the next try.
 
-Since the schema lives in code (`hello/notes_dao.py`), most changes are just edits to the DAO. Extend `CREATE_NOTES_SQL` for new tables; add `ALTER TABLE ... IF NOT EXISTS` statements for new columns. The lifespan hook runs `ensure_schema()` on every startup, so any additive change picks up on the next deploy.
+The whole runner is ~40 lines of Python — go read it. `Alembic` is the industry-standard version of the same idea, with more features (CLI, autogenerate, down-migrations). You'd promote to Alembic when the ~40-line homegrown runner starts feeling constraining. For a class project, it doesn't.
 
-Example: adding a `priority` column to `notes`:
+### Staging ↔ prod sync (this is why migrations matter)
 
-```python
-# hello/notes_dao.py — extended
-CREATE_NOTES_SQL = """
-CREATE TABLE IF NOT EXISTS notes (
-    id         SERIAL       PRIMARY KEY,
-    body       TEXT         NOT NULL,
-    created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
-)
-"""
+Because `apply_migrations()` runs on every deploy in every environment, and **staging and prod deploy from the same code in the same git repo**, the schema stays in sync automatically:
 
-ADD_PRIORITY_COLUMN_SQL = """
-ALTER TABLE notes ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0
-"""
-
-class NotesDAO:
-    def ensure_schema(self) -> None:
-        with psycopg.connect(self.database_url) as conn, conn.cursor() as cur:
-            cur.execute(CREATE_NOTES_SQL)
-            cur.execute(ADD_PRIORITY_COLUMN_SQL)   # idempotent — no-op after first run
+```
+You edit hello/notes_dao.py + add hello/migrations/003_add_tag.sql
+        ↓ commit + push to `staging`
+Coolify redeploys staging
+        ↓ apply_migrations() runs 003_add_tag.sql against staging's db
+Staging is now on schema v3
+        ↓ you verify /notes still works, tags are being written correctly
+Merge `staging` → `main`
+        ↓ Coolify redeploys prod
+        ↓ apply_migrations() runs 003_add_tag.sql against prod's db (same file!)
+Prod is now on schema v3
 ```
 
-Push, redeploy, done. Existing rows get `priority = 0`; the app can start reading/writing the column immediately. Works for:
+No separate "run migrations against prod" step. The deploy IS the migration. And because migrations are idempotent-by-tracking, if you ever have to redeploy the same commit, `apply_migrations()` sees the file is already recorded in `_migrations` and skips it.
 
-- New tables (`CREATE TABLE IF NOT EXISTS`)
-- New columns (`ADD COLUMN IF NOT EXISTS` — Postgres 9.6+)
-- New indexes (`CREATE INDEX IF NOT EXISTS`)
-- New constraints, as long as they don't fail on existing data
+### Example: adding a `priority` column
 
-Doesn't work for renames, drops, type changes, or anything that transforms existing data — for that, drop to the next tool.
+The template ships two migrations to demonstrate:
 
-### One-off maintenance via `psql`
+```
+hello/migrations/
+├── 001_create_notes.sql          -- CREATE TABLE notes (id, body, created_at)
+└── 002_add_priority.sql          -- ALTER TABLE notes ADD COLUMN priority INT DEFAULT 0
+```
 
-For anything the additive pattern can't handle — renaming a column, dropping a column, backfilling data, rebuilding an index — open a `psql` shell against the running db container and run SQL by hand.
+Migration 002 is the interesting one — it's the shape of most real schema changes. To add another (say, a `tag` column), you'd:
 
-**Locally:**
+1. Create `hello/migrations/003_add_tag.sql`:
+   ```sql
+   ALTER TABLE notes ADD COLUMN IF NOT EXISTS tag TEXT;
+   ```
+2. Update `hello/notes_dao.py` — extend the `SELECT` in `list_all()` to include `tag`, add a `tag` parameter to `insert()`.
+3. Update `hello/main.py` — add `tag: str | None = None` to the `NoteIn` model.
+4. Commit + push. `apply_migrations()` picks up the new file on the next startup; the app code that reads/writes `tag` deploys in the same commit; the endpoint immediately returns the new field.
+
+**One deploy, three coordinated changes, zero schema-drift risk.**
+
+### What the migration runner won't handle
+
+`apply_migrations()` runs whatever SQL you write; it doesn't know if the SQL is safe. Some things need care:
+
+- **Destructive changes** (`DROP COLUMN`, `RENAME COLUMN`, `ALTER COLUMN TYPE`): work as migrations, but they break any running app that expects the old shape. For zero-downtime destructive changes, use the "expand → migrate → contract" pattern: add the new column additively, backfill data into it, switch code to use it, later drop the old column (as another migration). For a class project you can usually skip the ceremony and just accept the brief downtime.
+- **Data backfills** at scale: fine as a migration for small tables, but a `UPDATE notes SET foo = ...` that touches millions of rows will lock the table. Real teams do backfills as separate jobs (or in batches inside a migration).
+- **Something else broke halfway**: the tracking-table insert is in the same transaction as the SQL, so failure = full rollback = migration not marked applied. Retry on next deploy is safe.
+
+### Running ad-hoc SQL (inspection, one-off queries)
+
+Migrations handle schema *evolution*. They don't help when you just want to look at your data or run a one-off `UPDATE`. For that you need a live SQL shell.
+
+The classic answer — "SSH to the DB machine and run `psql`" — doesn't work for students in this environment because **students don't have SSH access to rigel**. Three paths that DO work:
+
+**1. Local development (always available).** Run compose locally and get a real interactive `psql`:
 
 ```bash
 docker compose exec db psql -U appuser -d appdb
-# psql (16.x)
 # appdb=# \dt
-#              List of relations
-#  Schema | Name  | Type  |  Owner
-# --------+-------+-------+---------
-#  public | notes | table | appuser
-# appdb=# ALTER TABLE notes RENAME COLUMN body TO content;
-# ALTER TABLE
+# appdb=# SELECT id, body, priority FROM notes ORDER BY id DESC LIMIT 10;
 # appdb=# \q
 ```
 
-**In Coolify (instructor / anyone with rigel SSH):**
+For anything you want to *explore*, do it locally against a copy of the data (see the "Moving data between environments" subsection below for `pg_dump` + `psql` to copy prod data into a local db).
 
-```bash
-ssh rigel
-# List the db containers:
-docker ps --filter name=db- --format 'table {{.Names}}\t{{.Image}}'
-# Then exec in:
-docker exec -it db-<coolify-uuid>-<timestamp> psql -U appuser -d appdb
-```
+**2. Build an inspection endpoint on the app.** For anything you'd want to know from live prod data — "how many notes were created today?", "what's the distribution of priority values?" — the right answer is usually a proper endpoint on the app (`GET /notes/stats`, `GET /notes?created_after=...`) rather than ad-hoc SQL. This is real product work and it teaches good habits (auth, validation, caching, tests).
 
-**In Coolify UI (if your Coolify version has the Terminal tab):**
+**3. Coolify Terminal — with big caveats.** Coolify has a Terminal tab that lists every container running on the deployment server, including other students'. Two problems:
 
-Open the db resource → **Terminal** tab → run `psql -U appuser -d appdb`. Same shell, no SSH needed.
+- **Naming is opaque.** Container names follow `<service>-<coolify-uuid>-<timestamp>` where `<coolify-uuid>` is unique to each Application. Your db container would be `db-<your-app-uuid>-*`. You can find your UUID in your Application's URL or deploy log; matching it against a list of many similar-looking names is error-prone.
+- **Whether Coolify enforces "you can only exec into your own team's containers" varies by version and configuration.** If it doesn't, an accidental click on the wrong db container could damage another team's data.
 
-**Common maintenance recipes** — run all of these from inside `psql`:
+Given the multi-tenancy risk, **prefer paths 1 and 2 over Coolify Terminal for anything destructive**. If you truly need to run ad-hoc SQL against prod (which should be rare — if it's a repeated need, build an endpoint), ask your instructor and they'll SSH in for you.
+
+**Common SQL recipes** — run all of these from a `psql` shell (local or via instructor):
 
 ```sql
--- Rename a column (destructive, requires app code update in the same deploy)
-ALTER TABLE notes RENAME COLUMN body TO content;
+-- Look at recent notes
+SELECT id, body, priority, created_at
+  FROM notes ORDER BY id DESC LIMIT 20;
 
--- Change a column type (works if the cast is unambiguous)
-ALTER TABLE notes ALTER COLUMN priority TYPE BIGINT;
+-- Backfill: set priority for older rows
+UPDATE notes SET priority = 5 WHERE created_at < NOW() - INTERVAL '30 days';
 
--- Backfill a new column based on old data
-UPDATE notes SET priority = 1 WHERE created_at > NOW() - INTERVAL '7 days';
-
--- Drop a stale index
-DROP INDEX IF EXISTS notes_body_idx;
-
--- One-off cleanup — delete test junk
+-- Clean up test junk
 DELETE FROM notes WHERE body LIKE 'test-%';
 
--- Full backup to a local file (run on the host, not inside psql)
+-- Full backup to a local file (run on the HOST, not inside psql)
 docker compose exec db pg_dump -U appuser appdb > backup-2026-08-20.sql
 
 -- Restore from a local file
 cat backup-2026-08-20.sql | docker compose exec -T db psql -U appuser appdb
 ```
-
-**When to sync with a code change:** most maintenance is "the SQL first, then the code that expects the new shape" — but this splits the change over two moments where the app is in a partial state. For destructive changes prefer this sequence:
-
-1. Add the new column additively via `ensure_schema()`, deploy.
-2. Backfill via `psql` if needed.
-3. Update the app code to use the new column, deploy.
-4. Later (a week? a release?), drop the old column via `psql`.
-
-The pattern is "expand → migrate data → contract" and it's how zero-downtime schema changes work at real companies. For a class project you can usually skip the intermediate deploys and just do the reset dance (`POST /admin/reset` + push new code) since data loss isn't a real cost.
-
-### When to promote to Alembic
-
-Adopt a real migration tool when you hit any of these:
-
-- More than one person is changing the schema; you need to know "have I applied Alice's migration yet?"
-- You want reversible migrations (down as well as up).
-- You need to track migration history in the DB for auditing.
-- The `ensure_schema()` function is more than ~50 lines of DDL and you can't easily reason about what state the schema is in.
-
-For FastAPI + psycopg the standard tool is **Alembic** (part of the SQLAlchemy ecosystem — works fine without SQLAlchemy models, just SQL). Migrations live in `hello/migrations/versions/*.py`. Run `alembic upgrade head` at deploy time (in the lifespan hook, or as a separate compose command) to apply pending migrations.
-
-Class projects almost never need this. Real production apps almost always do. When you're in doubt, the `ensure_schema` pattern is fine — you can always add Alembic later without throwing away your existing work.
 
 ## Moving data between environments
 
