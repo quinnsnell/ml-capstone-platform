@@ -70,10 +70,13 @@ docs/book/
 # own git repo — exclude from this repo's tracking.
 sentiment-test-app/
 qsnell-hello-world-app/
-# Match any student's hello-world clone by the naming convention students use
-# (student-guide.md Step 4: <team-slug>-hello-world-app or similar).
+qsnell-hello/
+# Match any student's clone by the current naming convention
+# (student-guide.md Step 1: <yourname>-<appname> or <groupname>-<appname>).
 *-hello-world-app/
 hello-world-app/
+qsnell-*/
+drjones-*/
 
 # =============================================================================
 # Local test artifacts

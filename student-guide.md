@@ -395,7 +395,7 @@ The template ships **three** services in one Docker Compose project (each servic
 
 - `hello/` — the public FastAPI app on port 8000. This is what students grow into their real project.
 - `time/` — an internal FastAPI sidecar on port 8001 that returns the current UTC time. Stand-in for the kind of process you'd add later (a worker, a local model server, etc.). Reachable only from `hello`.
-- `db/` — an internal Postgres 16 database with a named-volume-backed data directory that survives restarts. Just an `init.sql` in the subdirectory; the container itself is the official `postgres:16-alpine` image.
+- `db` (defined in `docker-compose.yaml`, no subdirectory) — an internal Postgres 16 database with a named-volume-backed data directory that survives restarts. Uses the stock `postgres:16-alpine` image; the app owns the schema and creates it at startup via a FastAPI lifespan hook in `hello/main.py`.
 
 Compose starts all three together. Only `hello` gets a public URL in production; `time` and `db` stay on the internal Docker network. The Postgres data lives on a named volume (`db-data`) that persists across `docker compose down` / redeploys / reboots — see the **Persistent storage** section later in this guide for the full story.
 
@@ -1707,14 +1707,13 @@ services:
       - DATABASE_URL=postgresql://appuser:apppass@db:5432/appdb
 
   db:
-    image: postgres:16-alpine           # official image, no Dockerfile needed
+    image: postgres:16-alpine           # stock image — the db container is dumb storage
     environment:
       - POSTGRES_USER=appuser
       - POSTGRES_PASSWORD=apppass
       - POSTGRES_DB=appdb
     volumes:
-      - db-data:/var/lib/postgresql/data                        # ← THE PERSISTENT BIT
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro   # ← schema on first boot
+      - db-data:/var/lib/postgresql/data      # ← THE PERSISTENT BIT
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
       interval: 5s
@@ -1724,10 +1723,39 @@ volumes:
   db-data:                             # named volume declaration
 ```
 
-Two mounts on `db`:
+One mount on `db`: **`db-data:/var/lib/postgresql/data`** — the Postgres data directory lives on a named volume Docker manages. Survives `docker compose down`, redeploys, image rebuilds, host reboots. **Only** removed by `docker compose down -v`, `docker volume rm`, or deleting the Application in Coolify with the "delete volumes" box checked.
 
-- **`db-data:/var/lib/postgresql/data`** — the Postgres data directory lives on a named volume Docker manages. Survives `docker compose down`, redeploys, image rebuilds, host reboots. **Only** removed by `docker compose down -v`, `docker volume rm`, or deleting the Application in Coolify with the "delete volumes" box checked.
-- **`./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro`** — bind-mount from the repo. The official Postgres image auto-executes any `*.sql` file in `/docker-entrypoint-initdb.d/` **only on first startup** (when the data directory is empty). On every subsequent restart the entrypoint sees existing data and skips it. That's exactly what makes the volume persistent: after first boot, the schema is in the volume; the SQL file is decorative from then on.
+## Who owns the schema
+
+The db container ships empty (just the `POSTGRES_USER`/`POSTGRES_DB` from the env vars — no app tables). The `hello` app owns its schema and creates it at startup via a FastAPI lifespan hook:
+
+```python
+# hello/main.py — abbreviated
+CREATE_NOTES_SQL = """
+CREATE TABLE IF NOT EXISTS notes (
+    id         SERIAL       PRIMARY KEY,
+    body       TEXT         NOT NULL,
+    created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+)
+"""
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
+        cur.execute(CREATE_NOTES_SQL)      # idempotent — safe on every startup
+    yield
+
+app = FastAPI(..., lifespan=lifespan)
+```
+
+Why this pattern (vs. an `init.sql` inside the db container)?
+
+- **DB is a generic storage service.** Postgres doesn't care what tables you want. Swap it for MySQL, Cockroach, or a managed cloud DB and the db side changes ~5 lines; the app side stays the same because the schema definition lives with the code that uses it.
+- **Schema is code, and code lives with the app.** Same PR that adds a new endpoint adds the column it needs. Same test suite. Same CI. No coordinating across two repositories or two subdirectories.
+- **Self-healing.** `CREATE TABLE IF NOT EXISTS` runs on every app startup. If Postgres's data directory is fresh (first deploy ever), it creates the tables. If it's an existing volume with no schema (e.g. after a failed first deploy that half-initialized the data dir), it recovers automatically. If the tables already exist, it's a no-op.
+- **Follows the modern web-app convention.** Django, Rails, FastAPI+Alembic, Prisma, sqlx — they all put migrations in the app codebase and run them at startup or via a dedicated migration command. This template does the smallest possible version of that (`CREATE TABLE IF NOT EXISTS` in a lifespan hook) for teaching purposes.
+
+**Limitation:** the lifespan hook only handles **additive** schema changes (add a table, add a column with `IF NOT EXISTS`). For destructive changes (rename column, drop column, change type, backfill data) you need a real migration tool that tracks what's been applied — Alembic is the standard choice for FastAPI apps. For this class project, additive-only is almost always enough; adopt Alembic when you outgrow it.
 
 ## Prove it locally
 
@@ -1764,7 +1792,7 @@ docker compose up -d
 sleep 5
 
 curl http://127.0.0.1:8000/notes
-# []       <-- data gone, init.sql re-ran, empty table
+# []       <-- data gone, fresh volume, app recreated the table on startup, empty
 ```
 
 That five-step cycle is the mental model. Deploys are equivalent to `down`/`up` at the container level, so **your data survives deploys** the same way it survived `docker compose down` here.
@@ -1794,13 +1822,13 @@ Do NOT try to share a volume between two Applications by hand — you'd have bot
 
 ## Backups (or: why this matters less for class projects)
 
-Named volumes live on rigel's disk. If rigel dies, they're gone unless someone has a backup running elsewhere. **The class cluster does not currently back up student volumes.** For your class project this is fine — worst case you re-seed the database with `init.sql`. For real production data at a real company, you'd run a nightly `pg_dump` job that ships to S3 / rclone / whatever.
+Named volumes live on rigel's disk. If rigel dies, they're gone unless someone has a backup running elsewhere. **The class cluster does not currently back up student volumes.** For your class project this is fine — worst case, wipe the volume and let the app recreate the schema on startup. For real production data at a real company, you'd run a nightly `pg_dump` job that ships to S3 / rclone / whatever.
 
 ## Common gotchas
 
-- **`init.sql` doesn't re-run after first boot.** Change the schema and re-push? Nothing happens — Postgres sees the existing data directory. Either `docker compose down -v` locally (blows the data away) or write a proper migration and run it against the live db.
-- **Schema mismatches after code changes.** If your app expects a column that doesn't exist in the persisted volume, you'll get errors on POST/GET. Same fix as above.
-- **Wrong volume-vs-bind-mount syntax.** `db-data:/path` (no leading `./` or `/`) → named volume, managed by Docker. `./db/init.sql:/path:ro` → bind-mount from the repo, read-only. Mixing them up gives silent failures.
+- **Non-additive schema changes don't self-apply.** The lifespan hook only runs `CREATE TABLE IF NOT EXISTS` — safe on every startup, but a no-op if the table already exists. Renaming a column, dropping one, or changing a type won't propagate this way. When you need that, either wipe the volume (dev only) or add a real migration tool (Alembic for FastAPI). For adding new columns you can extend the lifespan hook with `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` — still idempotent, still safe.
+- **Schema mismatches after code changes.** If your app queries a column that doesn't exist in the persisted volume, you'll get uncaught SQL errors → 500. Fix: extend the lifespan hook with an `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, or wipe the volume locally to force a fresh start.
+- **Wrong volume-vs-bind-mount syntax.** `db-data:/path` (no leading `./` or `/`) → named volume, managed by Docker. `./local/thing:/path:ro` → bind-mount from the repo, read-only. Mixing them up gives silent failures. (The template avoids bind-mounts entirely because Coolify's extract-to-artifacts flow doesn't always propagate the source file to the container runtime.)
 - **`docker compose down -v` in production.** Never run this by hand on rigel unless you actually want to lose the data. Coolify does NOT pass `-v` when it redeploys; it's a footgun for humans.
 - **Coolify's `docker compose down` cleanup on redeploy.** Coolify's redeploy runs `docker compose down && docker compose up -d --build` without `-v`, so volumes always persist across deploys. Confirmed live on ml-capstone.
 
