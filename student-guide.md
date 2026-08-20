@@ -399,12 +399,12 @@ The template ships **three** services in one Docker Compose project (each servic
 
 Compose starts all three together. Only `hello` gets a public URL in production; `time` and `db` stay on the internal Docker network. The Postgres data lives on a named volume (`db-data`) that persists across `docker compose down` / redeploys / reboots — see the **Persistent storage** section later in this guide for the full story.
 
-Run the unit tests first. These use FastAPI's `TestClient` to call the routes **in-process** — no containers, no HTTP socket, no network. They import `app` directly from `hello/main.py` and hand it fake requests, so they're fast (<1s). The eight tests in `hello/tests/test_api.py` cover default English on `/`, Spanish via `?lang=es`, an unknown-language fallback, `/languages`, `/health`, a mocked `/time` call to the sidecar, and two mocked `/notes` tests against the DB. All boundaries are mocked so the tests don't need any container running.
+Run the unit tests first. These use FastAPI's `TestClient` to call the routes **in-process** — no containers, no HTTP socket, no network. They import `app` directly from `hello/main.py` and hand it fake requests, so they're fast (<1s). The twelve tests in `hello/tests/test_api.py` cover the greeting endpoints (`/`, `/languages`, `/health`), a mocked `/time` call to the sidecar, three `/notes` tests that mock the `NotesDAO` (list, insert, and 503-on-db-outage), and three `/admin/reset` tests (403 when disabled, calls DAO when enabled, 503 on db outage). All boundaries are mocked so the tests don't need any container running.
 
 ```bash
 pip install -r hello/requirements.txt httpx pytest
 cd hello && pytest -v
-# 8 tests pass
+# 12 tests pass
 cd ..
 ```
 
@@ -1727,10 +1727,10 @@ One mount on `db`: **`db-data:/var/lib/postgresql/data`** — the Postgres data 
 
 ## Who owns the schema
 
-The db container ships empty (just the `POSTGRES_USER`/`POSTGRES_DB` from the env vars — no app tables). The `hello` app owns its schema and creates it at startup via a FastAPI lifespan hook:
+The db container ships empty (just the `POSTGRES_USER`/`POSTGRES_DB` from the env vars — no app tables). The `hello` app owns its schema and creates it at startup via a FastAPI lifespan hook. All the actual SQL lives in a small **DAO** (`hello/notes_dao.py`) — a `NotesDAO` class that encapsulates every database interaction:
 
 ```python
-# hello/main.py — abbreviated
+# hello/notes_dao.py — abbreviated
 CREATE_NOTES_SQL = """
 CREATE TABLE IF NOT EXISTS notes (
     id         SERIAL       PRIMARY KEY,
@@ -1739,14 +1739,40 @@ CREATE TABLE IF NOT EXISTS notes (
 )
 """
 
+class NotesDAO:
+    def __init__(self, database_url: str):
+        self.database_url = database_url
+
+    def ensure_schema(self) -> None: ...    # runs CREATE TABLE IF NOT EXISTS
+    def list_all(self)     -> list[dict]: ...
+    def insert(self, body) -> dict: ...
+    def reset(self)        -> None: ...     # DROP + CREATE for /admin/reset
+```
+
+And `main.py` becomes thin — routes handle HTTP framing and delegate to the DAO:
+
+```python
+# hello/main.py — abbreviated
+from notes_dao import NotesDAO
+notes_dao = NotesDAO(DATABASE_URL)
+
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
-    with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
-        cur.execute(CREATE_NOTES_SQL)      # idempotent — safe on every startup
+async def lifespan(_app):
+    notes_dao.ensure_schema()   # idempotent — safe on every startup
     yield
 
 app = FastAPI(..., lifespan=lifespan)
+
+@app.get("/notes")
+def list_notes():
+    return notes_dao.list_all()
 ```
+
+**Why the DAO?** Three things get easier as you scale:
+
+- **Routes stay thin.** `main.py` reads like an HTTP contract, not a SQL script. Compare grepping `main.py` for "what HTTP endpoints exist" against `notes_dao.py` for "what SQL runs" — clear split, easy to navigate.
+- **Testing is cleaner.** Route tests patch DAO methods (`patch.object(main.notes_dao, "list_all", return_value=[...])`) instead of mocking psycopg's cursor/context-manager stack. See `hello/tests/test_api.py` — the `/notes` tests are ~3 lines each vs. ~10 lines when mocking psycopg directly.
+- **Swappable storage.** Want SQLite for a quick local test? Point NotesDAO at a different URL. Outgrow raw SQL and want SQLAlchemy? Replace `notes_dao.py`; `main.py` is unaffected because it only sees Python dicts.
 
 Why this pattern (vs. an `init.sql` inside the db container)?
 
@@ -1805,6 +1831,47 @@ Good news: **nothing to configure**. If your `docker-compose.yaml` declares a na
 - **Staging and prod are isolated.** Your staging Application and your prod Application are two different Coolify Applications → they each get their own `db-data` volume on rigel. They do NOT share data. **This is the correct default** — you never want staging test data mixed with prod user data.
 - **Deploys don't touch the volume.** On every push-to-deploy Coolify runs `docker compose down && docker compose up -d --build`. The container is recreated with the new image; the volume mount attaches to the same on-disk data. Zero data loss.
 - **Removing an Application.** If you delete an Application in Coolify's UI, you'll be asked whether to also delete its volumes. Uncheck that box and the data survives — you can point a new Application at the same volume later.
+
+## Cleaning up when things go wrong
+
+Persistence protects your data — which is a problem when the data is what's wrong. Two common scenarios and the fix for each:
+
+### Scenario 1: schema needs to change (non-additive) or data got corrupted
+
+Wipe just the app tables, keep the Postgres volume. The template ships an env-gated admin endpoint for this:
+
+```bash
+# Local dev (docker-compose.override.yml pre-enables it):
+curl -X POST http://127.0.0.1:8000/admin/reset
+# {"ok":true,"message":"notes table dropped and recreated (empty)"}
+
+# In Coolify (staging or prod):
+# 1. Application → Environment Variables → add ALLOW_ADMIN_RESET=true → Save
+# 2. Redeploy so the container picks up the new env
+# 3. curl -X POST http://<your-domain>/admin/reset
+# 4. Remove the env var so nobody can accidentally hit it again → Redeploy
+```
+
+Under the hood this calls `notes_dao.reset()`, which runs `DROP TABLE IF EXISTS notes` then `CREATE TABLE IF NOT EXISTS notes (...)`. All rows gone, table shape refreshed to whatever `notes_dao.py` currently says. Great for iterating on schema changes without touching the volume.
+
+**When to use:** you changed the columns and just want the table to match the new definition. Or you filled the table with test junk and want a clean slate.
+
+**Why env-gated:** a public `/admin/reset` that anyone could hit would be an ~1-second data-loss button. The `ALLOW_ADMIN_RESET` env var makes destructive endpoints opt-in and easy to disable again.
+
+### Scenario 2: the volume itself is what's broken (full disk, corrupted files, or you want to start truly fresh)
+
+Nuke the volume. Coolify's UI hides volume-delete for auto-declared compose volumes, so you have three routes, easiest last:
+
+- **Local dev:** `docker compose down -v` then `docker compose up -d --build`. The `-v` flag removes named volumes; next `up` recreates them empty and the app repopulates the schema via the lifespan hook.
+- **SSH to rigel** (instructor-only for this cluster):
+  ```bash
+  # Volume name is <coolify-uuid>_db-data — check the deploy log for the exact name.
+  docker volume rm <coolify-uuid>_db-data
+  ```
+  Then trigger a redeploy in Coolify.
+- **Delete and recreate the Coolify Application** with the "delete volumes" checkbox ticked. Nuclear — you'll re-add the domain, secrets, and env vars. Only sensible if the Application state is also wrong.
+
+For everyday schema iteration, prefer Scenario 1's `/admin/reset` — no SSH, no Coolify Application juggling.
 
 ## Moving data between environments
 
