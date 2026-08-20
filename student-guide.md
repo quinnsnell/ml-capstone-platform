@@ -1873,6 +1873,134 @@ Nuke the volume. Coolify's UI hides volume-delete for auto-declared compose volu
 
 For everyday schema iteration, prefer Scenario 1's `/admin/reset` — no SSH, no Coolify Application juggling.
 
+## Evolving the schema (migrations + maintenance)
+
+Every real app changes its schema over time: add a column, add a table, backfill data, drop a stale index. "SSH to the DB machine and run `psql`" is the classic maintenance workflow — that translates here to **`docker exec` into the db container and run `psql` from there**, since the DB is a container on rigel that isn't directly reachable from your laptop.
+
+Three tools cover the full range of what you'll need. Pick based on the change, not the tool you like:
+
+| Change type | Tool | Where you edit / run |
+|---|---|---|
+| Additive (new table, new column with default) | `notes_dao.ensure_schema()` | Edit `hello/notes_dao.py`, push, redeploy — runs automatically |
+| One-off / destructive (rename, drop, backfill, index tuning) | `psql` in the db container | Interactive `docker exec` from Coolify Terminal, SSH to rigel, or local `docker compose exec` |
+| Team-scale (multiple contributors, up/down migrations, version tracking) | Alembic (or similar) | Migration files in `hello/migrations/`, versioned in git |
+
+### Everyday additive changes (edit `ensure_schema` and push)
+
+Since the schema lives in code (`hello/notes_dao.py`), most changes are just edits to the DAO. Extend `CREATE_NOTES_SQL` for new tables; add `ALTER TABLE ... IF NOT EXISTS` statements for new columns. The lifespan hook runs `ensure_schema()` on every startup, so any additive change picks up on the next deploy.
+
+Example: adding a `priority` column to `notes`:
+
+```python
+# hello/notes_dao.py — extended
+CREATE_NOTES_SQL = """
+CREATE TABLE IF NOT EXISTS notes (
+    id         SERIAL       PRIMARY KEY,
+    body       TEXT         NOT NULL,
+    created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+)
+"""
+
+ADD_PRIORITY_COLUMN_SQL = """
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0
+"""
+
+class NotesDAO:
+    def ensure_schema(self) -> None:
+        with psycopg.connect(self.database_url) as conn, conn.cursor() as cur:
+            cur.execute(CREATE_NOTES_SQL)
+            cur.execute(ADD_PRIORITY_COLUMN_SQL)   # idempotent — no-op after first run
+```
+
+Push, redeploy, done. Existing rows get `priority = 0`; the app can start reading/writing the column immediately. Works for:
+
+- New tables (`CREATE TABLE IF NOT EXISTS`)
+- New columns (`ADD COLUMN IF NOT EXISTS` — Postgres 9.6+)
+- New indexes (`CREATE INDEX IF NOT EXISTS`)
+- New constraints, as long as they don't fail on existing data
+
+Doesn't work for renames, drops, type changes, or anything that transforms existing data — for that, drop to the next tool.
+
+### One-off maintenance via `psql`
+
+For anything the additive pattern can't handle — renaming a column, dropping a column, backfilling data, rebuilding an index — open a `psql` shell against the running db container and run SQL by hand.
+
+**Locally:**
+
+```bash
+docker compose exec db psql -U appuser -d appdb
+# psql (16.x)
+# appdb=# \dt
+#              List of relations
+#  Schema | Name  | Type  |  Owner
+# --------+-------+-------+---------
+#  public | notes | table | appuser
+# appdb=# ALTER TABLE notes RENAME COLUMN body TO content;
+# ALTER TABLE
+# appdb=# \q
+```
+
+**In Coolify (instructor / anyone with rigel SSH):**
+
+```bash
+ssh rigel
+# List the db containers:
+docker ps --filter name=db- --format 'table {{.Names}}\t{{.Image}}'
+# Then exec in:
+docker exec -it db-<coolify-uuid>-<timestamp> psql -U appuser -d appdb
+```
+
+**In Coolify UI (if your Coolify version has the Terminal tab):**
+
+Open the db resource → **Terminal** tab → run `psql -U appuser -d appdb`. Same shell, no SSH needed.
+
+**Common maintenance recipes** — run all of these from inside `psql`:
+
+```sql
+-- Rename a column (destructive, requires app code update in the same deploy)
+ALTER TABLE notes RENAME COLUMN body TO content;
+
+-- Change a column type (works if the cast is unambiguous)
+ALTER TABLE notes ALTER COLUMN priority TYPE BIGINT;
+
+-- Backfill a new column based on old data
+UPDATE notes SET priority = 1 WHERE created_at > NOW() - INTERVAL '7 days';
+
+-- Drop a stale index
+DROP INDEX IF EXISTS notes_body_idx;
+
+-- One-off cleanup — delete test junk
+DELETE FROM notes WHERE body LIKE 'test-%';
+
+-- Full backup to a local file (run on the host, not inside psql)
+docker compose exec db pg_dump -U appuser appdb > backup-2026-08-20.sql
+
+-- Restore from a local file
+cat backup-2026-08-20.sql | docker compose exec -T db psql -U appuser appdb
+```
+
+**When to sync with a code change:** most maintenance is "the SQL first, then the code that expects the new shape" — but this splits the change over two moments where the app is in a partial state. For destructive changes prefer this sequence:
+
+1. Add the new column additively via `ensure_schema()`, deploy.
+2. Backfill via `psql` if needed.
+3. Update the app code to use the new column, deploy.
+4. Later (a week? a release?), drop the old column via `psql`.
+
+The pattern is "expand → migrate data → contract" and it's how zero-downtime schema changes work at real companies. For a class project you can usually skip the intermediate deploys and just do the reset dance (`POST /admin/reset` + push new code) since data loss isn't a real cost.
+
+### When to promote to Alembic
+
+Adopt a real migration tool when you hit any of these:
+
+- More than one person is changing the schema; you need to know "have I applied Alice's migration yet?"
+- You want reversible migrations (down as well as up).
+- You need to track migration history in the DB for auditing.
+- The `ensure_schema()` function is more than ~50 lines of DDL and you can't easily reason about what state the schema is in.
+
+For FastAPI + psycopg the standard tool is **Alembic** (part of the SQLAlchemy ecosystem — works fine without SQLAlchemy models, just SQL). Migrations live in `hello/migrations/versions/*.py`. Run `alembic upgrade head` at deploy time (in the lifespan hook, or as a separate compose command) to apply pending migrations.
+
+Class projects almost never need this. Real production apps almost always do. When you're in doubt, the `ensure_schema` pattern is fine — you can always add Alembic later without throwing away your existing work.
+
 ## Moving data between environments
 
 Since staging and prod don't share volumes, there's no automatic promotion of data from staging to prod (or backfill from prod to staging). If you actually need this — e.g., copy a snapshot of prod data into staging so you can test against real-shaped data — use `pg_dump` and `psql`:
