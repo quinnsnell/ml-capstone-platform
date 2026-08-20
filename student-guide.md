@@ -2098,9 +2098,62 @@ You just did an end-to-end schema migration: **one commit, one deploy, four coor
 
 `apply_migrations()` runs whatever SQL you write; it doesn't know if the SQL is safe. Some things need care:
 
-- **Destructive changes** (`DROP COLUMN`, `RENAME COLUMN`, `ALTER COLUMN TYPE`): work as migrations, but they break any running app that expects the old shape. For zero-downtime destructive changes, use the "expand → migrate → contract" pattern: add the new column additively, backfill data into it, switch code to use it, later drop the old column (as another migration). For a class project you can usually skip the ceremony and just accept the brief downtime.
+- **Destructive changes** (`DROP COLUMN`, `RENAME COLUMN`, `ALTER COLUMN TYPE`): work as migrations, but they break any running app that expects the old shape mid-deploy. See "Migration workflow rules" below for the expand → migrate → contract pattern that avoids downtime.
 - **Data backfills** at scale: fine as a migration for small tables, but a `UPDATE notes SET foo = ...` that touches millions of rows will lock the table. Real teams do backfills as separate jobs (or in batches inside a migration).
 - **Something else broke halfway**: the tracking-table insert is in the same transaction as the SQL, so failure = full rollback = migration not marked applied. Retry on next deploy is safe.
+
+### Migration workflow rules
+
+Three habits worth building now — every migration system rewards them.
+
+**1. Migration file vs. `/admin/reset` — which tool for which job.**
+
+Both can drop tables. But they solve different problems:
+
+| | DROP in a migration file | POST /admin/reset |
+|---|---|---|
+| **Intent** | Schema is permanently evolving | Wipe my data right now |
+| **Persistence** | Committed to git, runs everywhere on next deploy | Ephemeral, per-environment |
+| **Cross-environment** | Runs on staging AND prod when merged | Only where you POST |
+| **Reversible** | No — need a new migration to undo | Trivially — just start writing again |
+| **Requires redeploy** | Yes | No |
+| **Git history** | Yes | No |
+
+Rule of thumb: **schema shape** changes → migration file. **Data reset** → `/admin/reset` (or `docker compose down -v` locally).
+
+Common mistake: writing `007_drop_test_data.sql` to clean up a full staging table. That DROP is now committed to git forever, will run against prod on the next merge, and produces "wait, why did prod lose data" incidents that are hard to explain in your PR review. Use `/admin/reset` for cleanup, migrations for evolution.
+
+**2. Never edit an already-deployed migration.**
+
+Once `003_add_thing.sql` has been applied against any shared environment (staging or prod), editing that file does nothing on the next deploy — `apply_migrations()` sees `003_add_thing.sql` already recorded in `_migrations` and skips it. Your edits sit ignored, your local db diverges from staging/prod, and the next new developer running from scratch gets your NEW file applied while everyone else stayed on the OLD version. Recipe for confusion.
+
+If you need to fix a migration that's already shipped, write **another** migration (`004_fix_003.sql`) that undoes and redoes whatever was wrong. Every migration system — Alembic, Rails, Django, Flyway — enforces this rule for the same reason.
+
+**Local iteration is the exception.** While you're still developing a migration and it hasn't hit staging yet, edit + reset + rerun as much as you want:
+
+```bash
+# Edit hello/migrations/003_add_thing.sql
+docker compose restart hello                    # lifespan re-runs migrations
+docker compose logs hello | grep migration      # see what happened
+
+# Something wrong? Wipe and retry:
+curl -X POST http://127.0.0.1:8000/admin/reset  # drops `notes` AND `_migrations`
+docker compose restart hello                    # migrations re-run from scratch
+```
+
+Because `/admin/reset` drops both the app tables and the `_migrations` tracking table, the next `apply_migrations()` call treats every file as pending and reruns from `001`. Iterate freely — as soon as you `git push` a migration to a shared branch, it's frozen.
+
+**3. Destructive changes without downtime: expand → migrate → contract.**
+
+If you already have prod data and need a destructive change (rename column, drop column, change type), the "one atomic PR" approach means a moment of brokenness during deploy — the container hosting the old code is still serving requests when the migration runs, and any read/write it does after the schema changes and before the new container swaps in blows up. Real teams avoid that with a three-step dance across three separate deploys:
+
+1. **Expand** (`migration N`): add the new column additively. Backfill from the old column in the same migration (small tables) or in a separate script (large tables). Old column still exists; code still reads it.
+2. **Migrate the code** (`migration N+1` if the shape further requires it, plus code changes): switch the code to read/write the new column. Old column still exists but is now unused.
+3. **Contract** (`migration N+2`, in a later PR — a week? a release?): drop the old column. Code no longer references it, so nothing breaks.
+
+Each step is a separate PR, separate deploy. Rollback story is easy: at any point you can revert to the previous deploy's code and both old + new columns are still present.
+
+For a class project the ceremony often isn't worth it — combine the changes into one deploy and accept the brief brokenness (or use `/admin/reset` to blow away the data, then let the new-shape migration run against an empty table). But recognize the pattern; you'll see it at every serious tech company.
 
 ### Running ad-hoc SQL (inspection, one-off queries)
 
