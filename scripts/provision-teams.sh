@@ -53,6 +53,13 @@
 #                                               # Falls back to $OPERATOR_EMAIL env var.
 #                                               # Set OPERATOR_EMAIL in your rigel shell
 #                                               # profile to make this automatic.
+#   ./provision-teams.sh --class-password <pw>  # set Coolify password for every user.
+#                                               # Needed because Coolify's UI destructive-
+#                                               # action modals prompt for a password even
+#                                               # for OAuth-authenticated sessions. Falls
+#                                               # back to $CLASS_PASSWORD env var. Document
+#                                               # the value you pick in student-guide's
+#                                               # Setup Step 2 so students know it.
 #   ./provision-teams.sh --check-schema         # dump all 6 tables' schemas, exit
 #   ./provision-teams.sh --show-sql             # also print the raw SQL (default: plan only)
 #   ./provision-teams.sh -h                     # this help
@@ -79,6 +86,20 @@ ROSTER=""
 # Silently no-op if unset (backward compatible).
 OBSERVER_EMAIL="${OPERATOR_EMAIL:-}"
 
+# Class-wide password for provisioned users. Coolify's UI destructive-action
+# modals (Delete Application, Delete Project, etc.) prompt for the user's
+# password even when the session was OAuth-authenticated. OAuth users have no
+# password unless we seed one — and Coolify's "Change Password" flow requires
+# a current password to set a new one, so students can't self-serve. The
+# password-reset-via-email flow needs working SMTP (currently broken on
+# ml-capstone). Setting a known class-wide password here unblocks the modals
+# without changing the GitHub OAuth login path (both auth methods remain
+# available; students still click "Sign in with GitHub" as before).
+#
+# Set via --class-password <value> or CLASS_PASSWORD env var. Default is a
+# placeholder; a loud warning is printed if unchanged.
+CLASS_PASSWORD="${CLASS_PASSWORD:-capstone-changeme}"
+
 # Coolify major.minor versions this script has been proven against. New minors
 # are likely fine but flag them so the operator can decide. Space-separated
 # list; each entry matches "<entry>.*" (e.g. "4.2" matches 4.2.0, 4.2.7, ...).
@@ -94,6 +115,7 @@ while [[ $# -gt 0 ]]; do
         --apply)         APPLY=1; shift ;;
         --roster)        ROSTER="$2"; shift 2 ;;
         --observer)      OBSERVER_EMAIL="$2"; shift 2 ;;
+        --class-password) CLASS_PASSWORD="$2"; shift 2 ;;
         --check-schema)  CHECK_SCHEMA=1; shift ;;
         --show-sql)      SHOW_SQL=1; shift ;;
         -h|--help)       usage ;;
@@ -215,13 +237,20 @@ fi
 
 common_banner_end
 
-# ---- Generate a placeholder bcrypt hash (via PHP in the coolify container)
-# Users we create authenticate via OAuth; the password column exists in Laravel's
-# users table (nullable per current Coolify schema, but seed a random hash to be
-# safe against schema tightening AND to ensure the email/password login form can
-# never succeed for these rows).
-PLACEHOLDER_HASH=$(docker exec coolify php -r 'echo password_hash(bin2hex(random_bytes(32)), PASSWORD_BCRYPT);' 2>/dev/null || true)
-if [[ -z "$PLACEHOLDER_HASH" ]]; then
+# ---- Bcrypt-hash the class-wide password via PHP in the coolify container --
+# See the CLASS_PASSWORD comment above the argument parser for why we seed a
+# known password rather than a random placeholder. Warn loudly if the default
+# is still in use so an instructor doesn't accidentally ship it to students.
+if [[ "$CLASS_PASSWORD" == "capstone-changeme" ]]; then
+    echo "WARNING: using default class password 'capstone-changeme'." >&2
+    echo "         Override with --class-password <value> or CLASS_PASSWORD env var." >&2
+    echo "         The default is intended as an obvious placeholder, not to ship." >&2
+fi
+
+# PHP-single-quote-safe escape of the password (' -> \', \ -> \\).
+php_esc_password=$(printf %s "$CLASS_PASSWORD" | sed -e 's/\\/\\\\/g' -e "s/'/\\\\'/g")
+CLASS_PASSWORD_HASH=$(docker exec coolify php -r "echo password_hash('$php_esc_password', PASSWORD_BCRYPT);" 2>/dev/null || true)
+if [[ -z "$CLASS_PASSWORD_HASH" ]]; then
     echo "ERROR: could not generate bcrypt hash via the 'coolify' container." >&2
     echo "Is the coolify container running? Try: docker ps | grep '^coolify'" >&2
     echo "Aborting — refusing to insert rows without a valid password hash." >&2
@@ -260,6 +289,12 @@ if [[ -n "$OBSERVER_EMAIL" ]]; then
     printf '  Observer:         %s (user_id=%s) will be added as admin of every team\n' \
         "$OBSERVER_EMAIL" "$OBSERVER_USER_ID"
 fi
+
+# ---- Announce the class password (once, at plan time) --------------------
+# Repeated so it's hard to miss when reviewing the plan output — instructors
+# need to distribute this to students.
+printf '  Class password:   %s   (users can type this into Coolify UI destructive-action modals)\n' \
+    "$CLASS_PASSWORD"
 
 # ---- Read + validate CSV ------------------------------------------------
 # Parse header, verify required columns present.
@@ -429,9 +464,15 @@ has_line() { grep -qxF -- "$2" <<<"$1"; }
 
         cat <<SQL
 -- Row: team=$team_name, user=$email
+-- ON CONFLICT UPDATE (not DO NOTHING) so re-running the script with a new
+-- --class-password rotates the password for existing users too. Students
+-- who set their own password via the UI would lose that override on re-run;
+-- document the tradeoff or coordinate class-wide reruns accordingly.
 INSERT INTO users (name, email, email_verified_at, password, created_at, updated_at)
-VALUES ('$e_name', '$e_email', NOW(), '$PLACEHOLDER_HASH', NOW(), NOW())
-ON CONFLICT (email) DO NOTHING;
+VALUES ('$e_name', '$e_email', NOW(), '$CLASS_PASSWORD_HASH', NOW(), NOW())
+ON CONFLICT (email) DO UPDATE
+    SET password   = EXCLUDED.password,
+        updated_at = NOW();
 
 INSERT INTO teams (name, description, personal_team, created_at, updated_at)
 SELECT '$e_team_name', 'Provisioned by provision-teams.sh${e_gh:+ (github=$e_gh)}', false, NOW(), NOW()

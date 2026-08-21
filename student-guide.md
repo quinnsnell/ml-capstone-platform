@@ -457,6 +457,8 @@ Get on the BYU VPN, then open **https://ml-capstone-admin.cs.byu.edu** and click
 
 **No invite email.** Your instructor has added your email to the class roster ahead of time. When you sign in with GitHub, Coolify sees that your GitHub account's primary email matches the roster row and links you to your pre-provisioned team automatically. If you see "Registration is disabled. Please contact the administrator" after authorizing GitHub, the email on your GitHub account doesn't match the roster — tell your instructor which email to use.
 
+> **Your Coolify password.** GitHub OAuth is how you log in day-to-day, but Coolify's UI asks for a **password** whenever you try to delete a resource (Application, Project, etc.). Your instructor set a class-wide password during provisioning — **ask them for it and write it down**. You'll type it into the confirmation modal when Coolify prompts. If you want to change it to something personal, go to your Profile → Change Password once you've used the class default at least once.
+
 ### 3. Find your team + verify the server
 
 The team switcher lives at the top of the main panel — it looks like a breadcrumb, with small up/down arrows next to each segment. Click your team's segment and pick your team from the dropdown (something like `Group 3` or `Alice Sandbox`). Initially, it will only have `Yourname Sandbox`

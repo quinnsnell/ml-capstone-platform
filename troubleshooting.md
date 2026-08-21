@@ -80,6 +80,28 @@ Coolify's build container downloads deps fresh each time. Possible issues:
 
 The `COOLIFY_API_TOKEN` secret is wrong or expired. Regenerate the token in Coolify (Keys & Tokens → API Tokens), update the repo secret.
 
+### Coolify UI asks for a password when I try to delete something
+
+Coolify's UI prompts for your password on destructive-action confirmations (Delete Application, Delete Project, etc.) even when your session is authenticated via GitHub OAuth. Your instructor set a **class-wide Coolify password** during provisioning — ask them for it and type it into the modal.
+
+If you forget the password AND you have your `COOLIFY_API_TOKEN` from Setup Step 8, you can bypass the UI entirely and delete resources via the API:
+
+```bash
+BASE=https://ml-capstone-admin.cs.byu.edu/api/v1
+TOKEN=<your COOLIFY_API_TOKEN>
+
+# List Projects, note UUIDs
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE/projects" | python3 -m json.tool
+
+# Delete a specific Application (surgical)
+curl -sS -X DELETE -H "Authorization: Bearer $TOKEN" "$BASE/applications/<uuid>"
+
+# Delete a whole Project (cascades to its Environments + Applications)
+curl -sS -X DELETE -H "Authorization: Bearer $TOKEN" "$BASE/projects/<uuid>"
+```
+
+The API doesn't ask for a password — token auth is sufficient. Same commands work for cleanup between fresh-slate testing rounds.
+
 ### Container starts but `/health` is 503
 
 The deep health check calls the LLM. If it fails:
