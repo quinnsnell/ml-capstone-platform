@@ -83,7 +83,7 @@ The per-row plan shows CREATE/EXISTS for each of the 6 tables (users, teams, tea
 
 **Step 3c — apply:**
 ```bash
-ssh rigel 'OPERATOR_EMAIL=snell@cs.byu.edu cd ~/ml-capstone-platform && ./scripts/provision-teams.sh --roster roster-2026-fall.csv --apply'
+ssh rigel 'cd ~/ml-capstone-platform && OPERATOR_EMAIL=snell@cs.byu.edu ./scripts/provision-teams.sh --roster roster-2026-fall.csv --apply'
 ```
 
 The script runs preflight → plan → apply → verify in one transactional batch. If any preflight fails, it aborts cleanly without touching state. If the post-apply verify fails, it exits non-zero so you notice.

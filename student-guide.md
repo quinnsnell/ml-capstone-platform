@@ -18,7 +18,7 @@ You can use either capability or both. This guide walks you through setting up e
 - **Part B — Deploying your app via CI/CD**
   - [The overall flow](#the-overall-flow) — architecture diagram + who does what
   - [Why staging + prod?](#why-staging--prod)
-  - [Setup: Create your repo, then sign in and create your Coolify Applications](#setup-create-your-repo-then-sign-in-and-create-your-coolify-applications) — the 10-step onboarding lab
+  - [Setup: Create your repo, then sign in and create your Coolify Applications](#setup-create-your-repo-then-sign-in-and-create-your-coolify-applications) — the 11-step onboarding lab (Coolify + first deploy + first schema migration)
   - [Section 1: Build your first deployable app](#section-1-build-your-first-deployable-app) — grow hello-world into a sentiment classifier
   - [Section 2: Test it locally](#section-2-test-it-locally)
   - [Section 3: Add tests](#section-3-add-tests)
@@ -341,6 +341,7 @@ You'll:
 5. Create one Application per Environment (both pointing at your class repo, different branches). While creating each, set **Advanced → Deployment → "Manual deployments only"** so GitHub Actions can gate deploys behind tests. (Optional: enable GPU in the same Advanced tab if your app needs one.)
 6. Copy the Deploy Webhook URLs + create an API token, paste into GitHub Actions secrets
 7. Push a commit to verify the pipeline works end-to-end
+8. Add a schema migration — extend the shipped `notes` table with a new column, watch the migration apply through staging and prod without losing existing data
 
 ### 1. Accept the org invite + create your class repo under `byu-ml-capstone`
 
@@ -793,6 +794,162 @@ Both should now return the 0.1.3 responses. **Your entire pipeline is proven end
 - **Live URL returns old version** — Coolify built but didn't swap containers, OR your browser cached. Hard refresh (Cmd/Ctrl+Shift+R), then check the Deployments log to confirm a new container was started.
 - **`curl` returns `Found` but browser shows JSON** — Coolify's Traefik is 302-redirecting `http://` to `https://`. Your Application's Domain still starts with `https://` or Force HTTPS is on (Advanced tab). Fix per Step 5's note.
 
+### 11. Add a schema migration to persist real data
+
+Steps 1–10 got you a working push-to-deploy pipeline. But your app has been running alongside a **Postgres database** this whole time and you probably haven't noticed — the template ships a third service (`db`) in `docker-compose.yaml` that the `hello` app talks to via `notes_dao.py`. This step is where you touch it.
+
+**Step A — See the DB in action.** Locally (or in staging), hit the notes endpoints:
+
+```bash
+./smoke-test.sh    # if you haven't already, this brings compose up
+
+curl -X POST http://127.0.0.1:8000/notes \
+  -H 'Content-Type: application/json' -d '{"body":"my first note"}'
+# {"id":1,"body":"my first note","created_at":"..."}
+
+curl http://127.0.0.1:8000/notes
+# [{"id":1,"body":"my first note","created_at":"..."}]
+```
+
+The row you just inserted lives in the Postgres data volume. `docker compose down` then `up` again — GET `/notes` still returns your row. Only `docker compose down -v` wipes it. In production, Coolify preserves the volume across every redeploy.
+
+Now let's **evolve the schema**. You'll add a `priority` column to `notes` without losing any existing data. Adding a schema change is a coordinated four-file edit: **new migration file + DAO changes + endpoint model change + tests**, all in one commit.
+
+**Step B — Look at the current migrations directory.**
+
+```
+hello/migrations/
+└── 001_create_notes.sql         -- creates the notes table on first startup
+```
+
+That's the only migration active. When your app starts, `notes_dao.apply_migrations()` reads `hello/migrations/*.sql`, checks the `_migrations` table to see what's already been applied, and runs anything new. Adding a schema change means committing a new numbered `.sql` file — the runner picks it up automatically on the next deploy.
+
+**Step C — Create the migration file.** New file `hello/migrations/002_add_priority.sql`:
+
+```sql
+-- Migration 002 — add a priority column to notes.
+-- Additive change: IF NOT EXISTS makes it safe to re-run.
+-- Existing rows get 0 via the DDL default.
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0;
+```
+
+The `NNN_description.sql` naming convention matters. The runner sorts alphabetically, so zero-padded prefixes keep order predictable up to 999 migrations.
+
+**Step D — Update the DAO.** In `hello/notes_dao.py`, extend `list_all()` to return the new column and `insert()` to accept + write it:
+
+```python
+def list_all(self) -> list[dict]:
+    with psycopg.connect(self.database_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, body, priority, created_at FROM notes ORDER BY id"   # ← add priority
+        )
+        rows = cur.fetchall()
+    return [
+        {
+            "id": r[0],
+            "body": r[1],
+            "priority": r[2],                                                  # ← new field
+            "created_at": r[3].isoformat(),
+        }
+        for r in rows
+    ]
+
+def insert(self, body: str, priority: int = 0) -> dict:                        # ← new param
+    with psycopg.connect(self.database_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO notes (body, priority) VALUES (%s, %s) "              # ← add priority
+            "RETURNING id, created_at",
+            (body, priority),                                                  # ← pass through
+        )
+        row = cur.fetchone()
+    return {
+        "id": row[0],
+        "body": body,
+        "priority": priority,                                                  # ← new field
+        "created_at": row[1].isoformat(),
+    }
+```
+
+**Step E — Update the API model + route.** In `hello/main.py`, let `NoteIn` accept the new field and pass it through:
+
+```python
+class NoteIn(BaseModel):
+    body: str
+    priority: int = 0                                                          # ← new, defaults to 0
+
+@app.post("/notes", status_code=201)
+def create_note(note: NoteIn):
+    try:
+        return notes_dao.insert(note.body, note.priority)                      # ← pass priority
+    except psycopg.OperationalError as e:
+        raise HTTPException(status_code=503, detail=f"db unreachable: {e}") from e
+```
+
+**Step F — Update the tests.** The existing `/notes` tests mock the DAO, so they need to know the DAO now returns/accepts `priority`. In `hello/tests/test_api.py`, update the two `/notes` mocked tests:
+
+```python
+def test_notes_list_returns_dao_output():
+    fake_rows = [
+        {"id": 1, "body": "first", "priority": 0, "created_at": "2026-08-20T12:00:00+00:00"},
+        {"id": 2, "body": "urgent", "priority": 5, "created_at": "2026-08-20T12:01:00+00:00"},
+    ]
+    with patch.object(main.notes_dao, "list_all", return_value=fake_rows):
+        r = client.get("/notes")
+    assert r.status_code == 200
+    assert r.json() == fake_rows
+
+
+def test_notes_create_passes_priority_to_dao():
+    fake_row = {
+        "id": 42,
+        "body": "hello",
+        "priority": 7,
+        "created_at": "2026-08-20T12:00:00+00:00",
+    }
+    with patch.object(main.notes_dao, "insert", return_value=fake_row) as m:
+        r = client.post("/notes", json={"body": "hello", "priority": 7})
+    assert r.status_code == 201
+    assert r.json() == fake_row
+    m.assert_called_once_with("hello", 7)     # ← DAO called with both args
+```
+
+Run `cd hello && pytest -v` and verify green before you push. Same tests-gate-deploy pattern from Step 10 — bad code shouldn't make it out of your machine.
+
+**Step G — Push, watch the migration apply, verify.**
+
+```bash
+git checkout staging
+git add hello/
+git commit -m "v0.1.4: add priority column to notes"
+git push
+```
+
+Watch the Coolify Deployments tab (or run `./smoke-test.sh http://<your-repo>-staging.ml-capstone.cs.byu.edu` after ~30s). During startup, the `hello` container logs `applied migration 002_add_priority.sql`. Redeploying the same commit later would instead log `no pending migrations` — the runner sees 002 already recorded in `_migrations` and skips it.
+
+Verify:
+
+```bash
+# The row from Step A survived — got priority=0 via the DDL default:
+curl http://<your-repo>-staging.ml-capstone.cs.byu.edu/notes
+# [{"id":1,"body":"my first note","priority":0,"created_at":"..."}]
+
+# New POST with priority works:
+curl -X POST http://<your-repo>-staging.ml-capstone.cs.byu.edu/notes \
+  -H 'Content-Type: application/json' -d '{"body":"urgent!","priority":5}'
+# {"id":2,"body":"urgent!","priority":5,"created_at":"..."}
+
+# And POST without priority still works — Pydantic's default kicks in:
+curl -X POST http://<your-repo>-staging.ml-capstone.cs.byu.edu/notes \
+  -H 'Content-Type: application/json' -d '{"body":"whenever"}'
+# {"id":3,"body":"whenever","priority":0,"created_at":"..."}
+```
+
+**Step H — Promote to prod.** Merge `staging` → `main` and push. Coolify redeploys prod. Prod's `hello` container starts, `apply_migrations()` runs `002_add_priority.sql` against prod's `db`, prod comes up on the same schema — automatically, from the same file in git. **This is why migrations matter.** Schema stays synchronized across environments without a separate "run migrations against prod" step.
+
+You just did an end-to-end schema migration: **one commit, one deploy, four coordinated files, zero schema drift, existing data preserved.** That's the workflow real teams use. The tools get fancier as you scale (Alembic instead of a hand-rolled runner), but the shape is identical.
+
+For deeper reference — how the runner is implemented, "expand → migrate → contract" for destructive changes, cleanup workflows, when to promote to Alembic — see the **Persistent storage** section later in this guide.
+
 ## Section 1: Build your first deployable app
 
 **The trajectory:** you started from `hello-world-app` (2 endpoints, no ML). By the end of this section, you'll have grown it into an LLM-backed sentiment classifier — structurally like the reference `byu-ml-capstone/sentiment-test-app`, which you can peek at whenever you want to see "what does this look like when it's done?" You're not going to fork sentiment-test-app; you're going to *build up to it*, one file at a time, so you understand every piece.
@@ -1232,7 +1389,7 @@ jobs:
 - Installs Python + the `hello/` service's dependencies (`pip install -r hello/requirements.txt httpx pytest`), then runs `pytest` from inside `hello/`. `httpx` is added on top because FastAPI's `TestClient` needs it, and `pytest` because it's a dev-only tool that doesn't belong in the app's `requirements.txt`.
 - If you add more services with their own tests (e.g. a `time/tests/` directory), add another install + pytest step for each — same pattern.
 - Consider adding a `docker compose build` step to catch Dockerfile bugs before deploy — cheap, and reveals problems that pip-installed pytest can't.
-- Uses GitHub-hosted runners (Ubuntu) — public internet, so unit tests can't hit the VPN-only classroom LLM (and won't have a GPU either). Keep unit tests offline: mock the network call, use FastAPI dependency overrides, OR add an env-guarded short-circuit in your app so tests can skip the expensive path. The reference `sentiment-test-app` uses the latter pattern — its code checks `SKIP_LOCAL_MODEL=1` and skips loading the ~500 MB local HuggingFace pipeline during CI (see its `main.py` / `config.py`). Your own code has to opt in — the env var doesn't do anything unless you check it.
+- Uses GitHub-hosted runners (Ubuntu) — public internet, so unit tests can't hit the VPN-only classroom LLM (and won't have a GPU either). Keep unit tests offline: mock the network call, use FastAPI dependency overrides, OR add an env-guarded short-circuit in your app so tests can skip the expensive path. The reference `sentiment-test-app` uses the latter pattern — its code checks `SKIP_LOCAL_MODEL=1` and skips loading the ~500 MB local HuggingFace pipeline during CI (see `sentiment/main.py` and `sentiment/config.py` in that repo). Your own code has to opt in — the env var doesn't do anything unless you check it.
 
 **Job 2 — `deploy-staging`.**
 
@@ -1751,10 +1908,10 @@ class NotesDAO:
     def __init__(self, database_url: str):
         self.database_url = database_url
 
-    def ensure_schema(self) -> None: ...    # runs CREATE TABLE IF NOT EXISTS
-    def list_all(self)     -> list[dict]: ...
-    def insert(self, body) -> dict: ...
-    def reset(self)        -> None: ...     # DROP + CREATE for /admin/reset
+    def apply_migrations(self) -> list[str]: ...   # runs any pending *.sql in migrations/
+    def list_all(self)         -> list[dict]: ...
+    def insert(self, body)     -> dict: ...
+    def reset(self)            -> None: ...        # DROP everything + re-apply for /admin/reset
 ```
 
 And `main.py` becomes thin — routes handle HTTP framing and delegate to the DAO:
@@ -1766,7 +1923,7 @@ notes_dao = NotesDAO(DATABASE_URL)
 
 @asynccontextmanager
 async def lifespan(_app):
-    notes_dao.ensure_schema()   # idempotent — safe on every startup
+    notes_dao.apply_migrations()   # runs any *.sql in migrations/ not already applied
     yield
 
 app = FastAPI(..., lifespan=lifespan)
@@ -1946,161 +2103,7 @@ No separate "run migrations against prod" step. The deploy IS the migration. And
 
 ### Hands-on: add a `priority` column
 
-The template ships with one migration active:
-
-```
-hello/migrations/
-└── 001_create_notes.sql         -- CREATE TABLE notes (id, body, created_at)
-```
-
-Adding a schema change is a coordinated four-file edit: **new migration file + DAO changes + endpoint model change + tests**. Walk through it now — you'll add a `priority INT DEFAULT 0` column to `notes`, expose it in the API, and watch the migration apply.
-
-**Step 1: baseline — confirm the current schema.**
-
-Deploy the template (or run `./smoke-test.sh`), then:
-
-```bash
-curl -X POST http://127.0.0.1:8000/notes \
-  -H 'Content-Type: application/json' -d '{"body":"before priority"}'
-# {"id":1,"body":"before priority","created_at":"..."}      ← no priority field
-
-curl http://127.0.0.1:8000/notes
-# [{"id":1,"body":"before priority","created_at":"..."}]
-```
-
-**Step 2: create the migration file.**
-
-Create `hello/migrations/002_add_priority.sql`:
-
-```sql
--- Migration 002 — add a priority column to notes.
--- Additive change: IF NOT EXISTS makes it safe to re-run.
--- Existing rows get 0 via the DDL default.
-ALTER TABLE notes ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0;
-```
-
-The `NNN_description.sql` filename convention matters. The runner sorts alphabetically, so zero-padded prefixes keep order predictable up to 999 migrations.
-
-**Step 3: update the DAO.**
-
-In `hello/notes_dao.py`, extend `list_all()` to return the new column and `insert()` to accept + write it:
-
-```python
-def list_all(self) -> list[dict]:
-    with psycopg.connect(self.database_url) as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT id, body, priority, created_at FROM notes ORDER BY id"   # <- add priority
-        )
-        rows = cur.fetchall()
-    return [
-        {
-            "id": r[0],
-            "body": r[1],
-            "priority": r[2],                                                  # <- new field
-            "created_at": r[3].isoformat(),
-        }
-        for r in rows
-    ]
-
-def insert(self, body: str, priority: int = 0) -> dict:                        # <- new param
-    with psycopg.connect(self.database_url) as conn, conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO notes (body, priority) VALUES (%s, %s) "              # <- add priority
-            "RETURNING id, created_at",
-            (body, priority),                                                  # <- pass through
-        )
-        row = cur.fetchone()
-    return {
-        "id": row[0],
-        "body": body,
-        "priority": priority,                                                  # <- new field
-        "created_at": row[1].isoformat(),
-    }
-```
-
-**Step 4: update the API model + route.**
-
-In `hello/main.py`, let `NoteIn` accept the new field and pass it through:
-
-```python
-class NoteIn(BaseModel):
-    body: str
-    priority: int = 0                                                          # <- new, defaults to 0
-
-@app.post("/notes", status_code=201)
-def create_note(note: NoteIn):
-    try:
-        return notes_dao.insert(note.body, note.priority)                      # <- pass priority
-    except psycopg.OperationalError as e:
-        raise HTTPException(status_code=503, detail=f"db unreachable: {e}") from e
-```
-
-**Step 5: update the tests.**
-
-The existing `/notes` tests mock the DAO, so they need to know the DAO now returns/accepts `priority`. In `hello/tests/test_api.py`, update the two `/notes` mocked tests:
-
-```python
-def test_notes_list_returns_dao_output():
-    fake_rows = [
-        {"id": 1, "body": "first", "priority": 0, "created_at": "2026-08-20T12:00:00+00:00"},
-        {"id": 2, "body": "urgent", "priority": 5, "created_at": "2026-08-20T12:01:00+00:00"},
-    ]
-    with patch.object(main.notes_dao, "list_all", return_value=fake_rows):
-        r = client.get("/notes")
-    assert r.status_code == 200
-    assert r.json() == fake_rows
-
-
-def test_notes_create_passes_priority_to_dao():
-    fake_row = {
-        "id": 42,
-        "body": "hello",
-        "priority": 7,
-        "created_at": "2026-08-20T12:00:00+00:00",
-    }
-    with patch.object(main.notes_dao, "insert", return_value=fake_row) as m:
-        r = client.post("/notes", json={"body": "hello", "priority": 7})
-    assert r.status_code == 201
-    assert r.json() == fake_row
-    m.assert_called_once_with("hello", 7)     # ← DAO called with both args
-```
-
-Run `cd hello && pytest -v` and verify green before you push. This is the tests-gate-deploy pattern — bad code shouldn't make it out of your machine.
-
-**Step 6: deploy and watch the migration fire.**
-
-Locally: `./smoke-test.sh` or `docker compose up -d --build`. In production: push to staging → Coolify redeploys.
-
-Watch the hello container's logs during startup:
-
-```bash
-docker compose logs hello | grep -i migration
-# INFO ... applied migration 002_add_priority.sql
-```
-
-That log line is `apply_migrations()` doing its job. If you re-deploy the same commit, you'll see `INFO ... no pending migrations` instead — the runner sees 002 already recorded in `_migrations` and skips it.
-
-**Step 7: verify.**
-
-```bash
-# The old row from Step 1 got priority=0 via the DDL default:
-curl http://127.0.0.1:8000/notes
-# [{"id":1,"body":"before priority","priority":0,"created_at":"..."}]
-
-# New POST with priority:
-curl -X POST http://127.0.0.1:8000/notes \
-  -H 'Content-Type: application/json' -d '{"body":"urgent!","priority":5}'
-# {"id":2,"body":"urgent!","priority":5,"created_at":"..."}
-
-# And POST without priority still works — Pydantic default kicks in:
-curl -X POST http://127.0.0.1:8000/notes \
-  -H 'Content-Type: application/json' -d '{"body":"whenever"}'
-# {"id":3,"body":"whenever","priority":0,"created_at":"..."}
-```
-
-You just did an end-to-end schema migration: **one commit, one deploy, four coordinated files, zero schema drift, existing data preserved.** That's the workflow real teams use — the tools get fancier (Alembic instead of a hand-rolled runner), but the shape is identical.
-
-**Promoting to prod:** merge `staging` → `main` and push. Coolify redeploys prod. Prod's hello container starts, `apply_migrations()` runs `002_add_priority.sql` against prod's `db`, prod comes up on the same schema. This is the "staging and prod share code, so migrations sync automatically" story from the previous subsection made concrete.
+The full step-by-step walkthrough — new migration file + DAO changes + endpoint model change + tests, all wired together — lives in **Setup Step 11** earlier in this guide. It's set up as a hands-on lab: baseline curl, create the migration, update the code, deploy, verify. Come back here for the reference material below once you've done it.
 
 ### What the migration runner won't handle
 

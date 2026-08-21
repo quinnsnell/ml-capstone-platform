@@ -61,6 +61,8 @@ ml-capstone-platform/
 │   ├── invite-to-org.sh           Invite roster users to the byu-ml-capstone GitHub org (runs on laptop)
 │   └── provision-gh-teams.sh      Create GitHub Teams mirroring Coolify teams + add members (runs on laptop)
 ├── sentiment-test-app/    Reference app: LLM + local HF, base+app Docker split, integration tests
+├── testing/
+│   └── test-playground/   Sandbox VS Code workspace to verify Continue + the classroom LLM before real use
 ├── tickets/
 │   ├── active-*.md        Open coordination tickets with CS IT
 │   └── archive/           Historical / resolved tickets
@@ -77,7 +79,7 @@ ml-capstone-platform/
 | GitHub webhook (auto-deploy) | `https://ml-capstone.cs.byu.edu/webhooks/*` | Public internet (via CS IT HAProxy) |
 | Coolify API (deploy trigger from GitHub Actions) | `https://ml-capstone-admin.cs.byu.edu/api/v1/deploy/...` | Public internet, token-gated (via CS IT HAProxy) |
 | Coolify admin UI | `https://ml-capstone-admin.cs.byu.edu` | Publicly resolvable but OAuth-gated (invite-only) |
-| Student group apps | `http://<team-slug>.ml-capstone.cs.byu.edu` | VPN (serve HTTP — wildcard cert covers one level only) |
+| Student group apps | `http://<your-repo>.ml-capstone.cs.byu.edu` | VPN (serve HTTP — wildcard cert covers one level only) |
 
 Model aliases exposed by LiteLLM:
 

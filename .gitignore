@@ -68,15 +68,18 @@ docs/book/
 # Class app repos live at github.com/byu-ml-capstone/*. Keeping local clones
 # here (alongside the platform code) is convenient for testing but each is its
 # own git repo — exclude from this repo's tracking.
+# Reference apps that live at the platform root but are their own repos
+# on GitHub (byu-ml-capstone/*). Keep local clones for testing; don't
+# track them as part of the platform repo.
 sentiment-test-app/
-qsnell-hello-world-app/
-qsnell-hello/
-# Match any student's clone by the current naming convention
-# (student-guide.md Step 1: <yourname>-<appname> or <groupname>-<appname>).
-*-hello-world-app/
 hello-world-app/
-qsnell-*/
-drjones-*/
+
+# Student clones live under testing/, alongside the tracked
+# test-playground/. Ignore every subdirectory of testing/ except the
+# one we ship — pattern automatically covers any future student clone
+# without needing per-name additions.
+testing/*/
+!testing/test-playground/
 
 # =============================================================================
 # Local test artifacts

@@ -132,6 +132,26 @@ The `*.cs.byu.edu` DigiCert cert is valid Jul 9 2026 → Jan 23 2027. Renewal is
 
 ---
 
+## Database / persistent storage problems
+
+### `/notes` (or another DB-backed endpoint) returns 500 after a deploy
+
+The app couldn't apply its schema. Check the Coolify container logs for the `hello` (or your app's) service — look for `applied migration ...` or a `psycopg` traceback. Common causes:
+
+- **Migration SQL is broken.** Fix the `.sql` file, push. `apply_migrations()` didn't record the failed one (the tracking-table insert is in the same transaction as the SQL), so it'll retry on the next deploy.
+- **Column removed but code still queries it.** You dropped a column in a migration but forgot to update `list_all()` / `insert()` in the DAO. Push the DAO fix.
+- **Database was hand-modified and diverged from what code expects.** `POST /admin/reset` wipes everything and re-applies migrations from scratch. Set `ALLOW_ADMIN_RESET=true` in Coolify env vars → redeploy → curl the endpoint → remove the env var → redeploy.
+
+### `docker compose down -v` locally lost data. Can I recover?
+
+No. `-v` deletes the named volume, and there's no backup unless you took one. `pg_dump` before destructive ops if you care about the data. For class projects, the app's `apply_migrations()` will recreate the schema on next startup — just re-populate.
+
+### Coolify's Persistent Storage tab shows my volume but there's no delete button
+
+Correct — Coolify hides delete for auto-declared compose volumes. To nuke: SSH to rigel and `docker volume rm <coolify-uuid>_db-data` (name is in the deploy log), or delete the Application with the "delete volumes" checkbox. See `student-guide.md`'s "Cleaning up when things go wrong" for the full procedure.
+
+---
+
 ## GPU allocation problems
 
 ### `/gpu` shows `cuda_available: false`
