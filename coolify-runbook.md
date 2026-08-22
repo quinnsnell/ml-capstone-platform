@@ -517,6 +517,14 @@ Student app *data* is a per-app problem — students configure backups for their
 
 **Upgrade Coolify:** UI → **Settings → Update**, or re-run the installer (idempotent).
 
+**Post-install patches (reapply after every Coolify update):** the class instance runs one local patch against `app/Http/Controllers/Api/ApplicationsController.php`. Any Coolify upgrade (auto or manual) or `coolify` container recreate wipes it — the terraform bonus lab (`testing/qsnell-hello/terraform/`) will start failing with `HTTP 404: Github App not found` until you reapply.
+
+| Patch | Fixes | Upstream | Apply |
+|---|---|---|---|
+| `applications/private-github-app` honors `is_system_wide` | `POST /api/v1/applications/private-github-app` returns 404 for system-wide GitHub Apps on team-scoped tokens, blocking the terraform bonus lab | [coollabsio/coolify#11449](https://github.com/coollabsio/coolify/issues/11449) (bug), [PR #11451](https://github.com/coollabsio/coolify/pull/11451) (fix) | `scripts/repatch-coolify.sh --apply` on rigel |
+
+The script is idempotent, dry-runs by default, and refuses on Coolify versions outside its known-good range. When upstream #11451 merges AND rigel updates past it, delete the script + this row + the "Requires locally-patched Coolify" section in the terraform lab README. Track state in `tickets/coolify-upstream/`.
+
 **End of semester:**
 
 1. Export team + resource list.
@@ -533,6 +541,7 @@ Student app *data* is a per-app problem — students configure backups for their
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | Student push doesn't trigger deploy | GitHub webhook failed, HAProxy dropped the connection, or Actions job never fired the curl | GitHub Actions tab first; then GitHub App → Advanced → Recent Deliveries; then HAProxy diagnostic (see [`troubleshooting.md`](troubleshooting.md) "CS IT HAProxy returns EOF") |
+| Terraform bonus lab fails: `HTTP 404: Github App not found` | Local patch for coollabsio/coolify#11449 got wiped by a Coolify update or container recreate | `scripts/repatch-coolify.sh --apply` on rigel (see §16 "Post-install patches") |
 | Build fails with "no space left" | Docker build cache full | Run the prune cron manually |
 | All apps 502 | Traefik crashed or Coolify updated mid-request | `docker restart coolify-proxy` |
 | TLS cert about to expire | `*.cs.byu.edu` DigiCert expires 2027-01-23 | File CS IT ticket for renewal; drop new files in `/data/coolify/proxy/certs/`; `docker restart coolify-proxy` (§8) |

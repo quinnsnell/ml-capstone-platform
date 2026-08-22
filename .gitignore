@@ -90,7 +90,7 @@ testing/*/
 # .terraform.lock.hcl IS tracked (pins provider versions) — do NOT ignore it.
 **/.terraform/
 **/*.tfstate
-**/*.tfstate.backup
+**/*.tfstate.*
 **/*.tfvars
 **/*.tfvars.json
 **/tfplan

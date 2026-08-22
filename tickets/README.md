@@ -10,6 +10,16 @@ Historical + active tickets we've sent (or plan to send) to BYU CS IT. Kept for 
 
 _None as of 2026-08-12._
 
+## Upstream project issues
+
+Bugs filed against third-party projects we depend on (not CS IT). Kept here
+so future admins know what's outstanding and can update reports as versions
+move.
+
+| File | Project | Upstream link | Summary |
+|---|---|---|---|
+| [`coolify-upstream/2026-08-21-team-token-cannot-reference-org-github-app.md`](coolify-upstream/2026-08-21-team-token-cannot-reference-org-github-app.md) | Coolify | Issue [#11449](https://github.com/coollabsio/coolify/issues/11449) + PR [#11451](https://github.com/coollabsio/coolify/pull/11451) (2026-08-21) | `POST /applications/private-github-app` returns 404 for `is_system_wide` GitHub Apps when called with a non-root-team token — blocks full Terraform-based team provisioning. Fix verified against live v4.3.7. |
+
 ## Archive (resolved or superseded)
 
 Chronological order.
