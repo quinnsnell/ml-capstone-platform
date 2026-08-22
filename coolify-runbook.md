@@ -523,7 +523,7 @@ Student app *data* is a per-app problem — students configure backups for their
 |---|---|---|---|
 | `applications/private-github-app` honors `is_system_wide` | `POST /api/v1/applications/private-github-app` returns 404 for system-wide GitHub Apps on team-scoped tokens, blocking the terraform bonus lab | [coollabsio/coolify#11449](https://github.com/coollabsio/coolify/issues/11449) (bug), [PR #11451](https://github.com/coollabsio/coolify/pull/11451) (fix) | `scripts/repatch-coolify.sh --apply` on rigel |
 
-The script is idempotent, dry-runs by default, and refuses on Coolify versions outside its known-good range. When upstream #11451 merges AND rigel updates past it, delete the script + this row + the "Requires locally-patched Coolify" section in the terraform lab README. Track state in `tickets/coolify-upstream/`.
+The script is idempotent, dry-runs by default, and refuses on Coolify versions outside its known-good range. Upstream PR #11451 was **closed without merge** on 2026-08-21 with "already fixed in next" — but the fix is not actually in `next` (the buggy line is still there), only in the unreleased `v5.x` rewrite where the entire file is gone. So this patch is the indefinite solution for the v4.x lifetime. Retest against Coolify v5 once it ships stable; if v5 handles system-wide GitHub Apps correctly, delete the script + this row + the "Requires locally-patched Coolify" section in the terraform lab README, and migrate rigel. Track state in `tickets/coolify-upstream/`.
 
 **End of semester:**
 

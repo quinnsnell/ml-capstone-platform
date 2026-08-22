@@ -1,8 +1,9 @@
 # `POST /applications/private-github-app` returns 404 for system-wide GitHub Apps when called with a non-root-team token
 
-**Status:** Filed as [coollabsio/coolify#11449](https://github.com/coollabsio/coolify/issues/11449) on 2026-08-21; fix proposed in [PR #11451](https://github.com/coollabsio/coolify/pull/11451) (verified against running v4.3.7)
+**Status:** Filed as [coollabsio/coolify#11449](https://github.com/coollabsio/coolify/issues/11449) on 2026-08-21; fix proposed in [PR #11451](https://github.com/coollabsio/coolify/pull/11451) (verified against running v4.3.7). Both **CLOSED without merge** by @andrasbacsai on 2026-08-21 with the comment *"Already fixed in next, but thank you for the PR."* Verification shows the fix is NOT in the `next` branch (`ApplicationsController.php:1607` still has the buggy `whereTeamId` lookup); likely deferred to the `v5.x` rewrite where that file is gone entirely. Local patch (`scripts/repatch-coolify.sh`) is now the **indefinite solution for the v4.x lifetime**. Retest against v5 once it ships stable.
 **Filed by:** @quinnsnell
 **Date drafted:** 2026-08-21
+**Date closed upstream:** 2026-08-21
 
 ---
 
