@@ -31,6 +31,13 @@ You can use either capability or both. This guide walks you through setting up e
 - [Using a GPU in your app](#using-a-gpu-in-your-app)
 - [Persistent storage (databases, uploaded files, anything stateful)](#persistent-storage-databases-uploaded-files-anything-stateful)
 - [Troubleshooting](#troubleshooting)
+- **Bonus: Infrastructure as Code** — optional, after Part B
+  - [What is Infrastructure as Code?](#what-is-infrastructure-as-code)
+  - [What this bonus lab does](#what-this-bonus-lab-does)
+  - [Setting up for the bonus](#setting-up-for-the-bonus)
+  - [The walkthrough](#the-walkthrough)
+  - [Reading the code](#reading-the-code)
+  - [What to notice](#what-to-notice)
 - [Quick reference](#quick-reference)
 
 ## Before you start
@@ -2281,11 +2288,138 @@ These bypass LiteLLM, so you must change the *model name* in your client from `c
 
 # Bonus: Infrastructure as Code
 
-When you templated your repo from `hello-world-app` (Setup Step 1), you got a `terraform/` directory in the root. That's an optional bonus lab: one `terraform apply` recreates everything you just did through the UI (Setup Steps 4–9) as declarative HCL — Coolify Project, both Environments, both Applications, and all three GitHub Actions secrets, in a single command.
+Optional. Do this **after** you've finished Part B end-to-end at least once — the point is to see the same wiring you did by hand, this time expressed as code. Everything you need ships in the `terraform/` directory of any repo templated from `hello-world-app`.
 
-Prerequisite: finish the whole UI-driven flow above at least once. The point of the bonus isn't to replace the UI walkthrough — it's to see the same wiring expressed declaratively, so you understand what IaC actually is.
+## What is Infrastructure as Code?
 
-Start at `terraform/README.md` in your templated repo. The lab documents its own one manual step (setting the pretty domain via Coolify UI — the coolify terraform provider doesn't model per-service domains yet) and the "why" behind each provider choice.
+You just spent Part B's Setup Steps 4–9 clicking through Coolify's UI: create a Project, add two Environments, create two Applications, wire each to a GitHub branch, copy webhook URLs, paste secrets into GitHub. It worked, but the "how" lives only in your muscle memory and this document. If Coolify redesigns the UI, your walkthrough goes stale. If someone accidentally deletes the Project, you rebuild from memory. If a groupmate needs the same setup on a new repo, you walk them through it live.
+
+**Infrastructure as Code** (IaC) replaces the "click through the UI" workflow with declarative text files: you write down what you want infrastructure to look like, and a tool ("Terraform" in this lab) makes reality match. Same input, same output, every time. Concretely, you'll write ~150 lines of **HCL** (HashiCorp Configuration Language) describing your Coolify + GitHub setup, then:
+
+- `terraform apply` → 7 resources appear (Project, Environment, 2 Applications, 3 GitHub secrets)
+- Edit a value, `terraform apply` again → only what changed gets updated
+- `terraform destroy` → everything you created goes away cleanly
+
+Why it matters beyond "cool trick":
+
+- **Reproducibility.** Clone your repo, run one command, get the exact same setup. No "what did I click last time?"
+- **Version control.** Infrastructure changes go through git — diff-able, reviewable, revert-able.
+- **Code review.** A teammate looks at your `main.tf` and catches "you named the domain wrong" before you break prod.
+- **Disaster recovery.** Coolify dies for a day and comes back empty? Re-run `terraform apply`; you're back.
+- **Career skill.** Every serious infrastructure role touches Terraform, AWS CloudFormation, Kubernetes YAML, Ansible, or Pulumi. Same mental model as this lab.
+
+Terraform is three verbs:
+
+- **`terraform plan`** — dry run. Shows what would change if you applied. No side effects.
+- **`terraform apply`** — execute. Creates/modifies/destroys resources to match your code. Records what it did in a local `terraform.tfstate` file so it knows what exists next time.
+- **`terraform destroy`** — reverse. Deletes everything in state.
+
+## What this bonus lab does
+
+One `terraform apply` recreates Part B's Setup Steps 4–9 in a single command:
+
+- Coolify **Project** named after your repo (Step 4)
+- **staging Environment** — production is auto-created when the Project is born (Step 4)
+- **staging Application** wired to your `staging` branch (Step 5)
+- **production Application** wired to `main` (Step 6)
+- **`COOLIFY_API_TOKEN`** GitHub Actions secret (Step 8)
+- **`COOLIFY_DEPLOY_WEBHOOK_STAGING`** secret — URL constructed in HCL from the Application UUID (Step 7)
+- **`COOLIFY_DEPLOY_WEBHOOK_PROD`** secret — ditto (Step 9)
+
+**One thing terraform can't do end-to-end**: set the pretty domain (`<your-repo>.ml-capstone.cs.byu.edu`) on each Application. The Coolify terraform provider is still maturing and doesn't model per-service `docker_compose_domains` yet, so you paste the domain into Coolify's UI once per Application — a one-text-field manual step. The `next_steps` terraform output tells you exactly what to paste. The lab's own `terraform/README.md` explains the three-deep chain of API limitations behind this — a real learning moment about "when your provider doesn't cover something, do you fight the tool or document the gap honestly?"
+
+## Setting up for the bonus
+
+You'll need:
+
+1. **Terraform** installed on your laptop:
+   ```bash
+   # macOS
+   brew tap hashicorp/tap
+   brew install hashicorp/tap/terraform
+   ```
+   Verify with `terraform version` — expect 1.5 or higher. (OpenTofu — `brew install opentofu` — is a drop-in replacement if you prefer the open-source fork.)
+
+2. **A fresh templated repo** just for the bonus, so `terraform destroy` won't touch your real project. Follow Part B Setup Step 1 to template a new repo from `byu-ml-capstone/hello-world-app`, name it something like `<yourname>-terraform-lab`, and `gh repo clone` it locally.
+
+3. **A Coolify API token.** In Coolify UI: dashboard menu (top-left Coolify wordmark) → Keys & Tokens → API Tokens → + New Token. Description: `terraform-lab`. Permissions: `root` (or view + create + deploy + delete). Create → copy immediately (Coolify shows it once).
+
+4. **A GitHub Personal Access Token** with `repo` scope: `gh auth token` if you have the gh CLI, otherwise Settings → Developer settings → Personal access tokens → Tokens (classic) → new token with `repo` scope. Copy immediately.
+
+## The walkthrough
+
+Everything happens in the `terraform/` directory of your templated repo:
+
+```bash
+cd <yourname>-terraform-lab/terraform
+
+# Fill in your secrets — the template file has step-by-step comments
+cp terraform.tfvars.example terraform.tfvars
+$EDITOR terraform.tfvars
+
+# Initialize (downloads the coolify + github terraform providers)
+terraform init
+
+# Preview the plan (dry run — no side effects)
+terraform plan
+# Expect: Plan: 7 to add, 0 to change, 0 to destroy
+
+# Apply — terraform prints the plan again, asks "yes"; type yes
+terraform apply
+# Takes ~10 seconds. Watch each resource create.
+
+# Read the next_steps output — tells you the ONE UI click remaining
+terraform output next_steps
+```
+
+Now the one manual step. In Coolify UI → your Project → **each** Application → Configuration → **Domains** → under the `hello` service, paste the pretty URL (the `terraform output next_steps` message has the exact string). Do this for both staging and production. Save each.
+
+Then trigger the deploy exactly like Part B taught you:
+
+```bash
+# From your repo root (not the terraform dir):
+git checkout staging
+git commit --allow-empty -m "trigger first deploy"
+git push origin staging
+```
+
+Watch the GitHub Actions tab run tests → POST the staging webhook → Coolify build + deploy. Hit `http://<yourname>-terraform-lab-staging.ml-capstone.cs.byu.edu` — same result as the UI flow, this time reproducible from code.
+
+Merge staging → main to trigger the prod deploy.
+
+When you're done exploring:
+
+```bash
+cd terraform
+terraform destroy
+# Removes the Project (cascades to Environments + Applications) + all 3 GitHub secrets
+```
+
+Then delete the throwaway GitHub repo (`gh repo delete byu-ml-capstone/<yourname>-terraform-lab --yes`) if you want a fully clean slate.
+
+## Reading the code
+
+Open `terraform/main.tf` in your editor. Every block is commented — read them, they're the point of the lab. Structure:
+
+- `terraform { required_providers { ... } }` — which terraform providers this config depends on. Two here: `bindtech-xyz/coolify` (Coolify resources) and `integrations/github` (GitHub Actions secrets on your repo).
+- `provider "coolify" { ... }` / `provider "github" { ... }` — how each provider authenticates.
+- `resource "coolify_project" "app" { ... }` — declares the Project. Field-by-field maps to what you'd type in the UI.
+- `resource "coolify_application" ...` — the two Applications. Block-level comments explain oddities like `ports_exposes = "80"` for dockercompose apps (Coolify silently forces the value; sending anything else errors out).
+- `resource "github_actions_secret" ...` — the three secrets. The two webhook secrets have their URLs built from the Application UUIDs via `locals` and string interpolation, so no manual copy-paste from the UI is needed.
+
+`variables.tf` shows the inputs — what you supply in `terraform.tfvars` versus what has a class-default already filled in (server UUID, GitHub App UUID, etc.).
+
+`outputs.tf` shows what terraform returns after apply — UUIDs, URLs, and the `next_steps` message printed at the end.
+
+`terraform.tfvars.example` walks through each input, teaching the tfvars format.
+
+## What to notice
+
+- **Idempotency.** Run `terraform apply` twice in a row — the second says "no changes." Terraform only acts on drift between your code and reality.
+- **Diffing.** Change something in `main.tf`, run `terraform plan` — see what would change before you commit. Change something in Coolify UI directly (rename a Project, say), run `plan` — terraform notices the drift and offers to un-do it.
+- **State.** `terraform.tfstate` is a JSON file tracking every resource terraform manages. That's how it knows what to `destroy`, and why you should never edit it by hand. In real teams this file moves to a remote backend (S3, Terraform Cloud) so multiple engineers don't clobber each other's changes.
+- **Providers are contracts.** `bindtech-xyz/coolify` is a community-maintained plugin; it exposes only what its author has modeled. When a provider doesn't cover something you need — like the per-service domain case here — you either wait, contribute a fix upstream, or drop to an escape hatch (a shell command wrapped in a `local-exec` provisioner). This lab documents that gap honestly rather than pretending it doesn't exist.
+- **The shape generalizes.** Same three verbs (plan / apply / destroy), same declarative style, same idempotency for Terraform against AWS, GCP, Kubernetes, GitHub, Cloudflare, and dozens more. Once you've internalized the pattern once — which is exactly what this lab is for — it applies everywhere.
 
 ---
 
