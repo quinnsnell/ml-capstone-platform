@@ -517,7 +517,7 @@ Student app *data* is a per-app problem — students configure backups for their
 
 **Upgrade Coolify:** UI → **Settings → Update**, or re-run the installer (idempotent).
 
-**Post-install patches (reapply after every Coolify update):** the class instance runs one local patch against `app/Http/Controllers/Api/ApplicationsController.php`. Any Coolify upgrade (auto or manual) or `coolify` container recreate wipes it — the terraform bonus lab (`testing/qsnell-hello/terraform/`) will start failing with `HTTP 404: Github App not found` until you reapply.
+**Post-install patches (reapply after every Coolify update):** the class instance runs one local patch against `app/Http/Controllers/Api/ApplicationsController.php`. Any Coolify upgrade (auto or manual) or `coolify` container recreate wipes it — the terraform bonus lab (in each student's `hello-world-app`-templated repo, under `terraform/`) will start failing with `HTTP 404: Github App not found` until you reapply.
 
 | Patch | Fixes | Upstream | Apply |
 |---|---|---|---|
