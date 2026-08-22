@@ -35,7 +35,9 @@ You can use either capability or both. This guide walks you through setting up e
   - [What is Infrastructure as Code?](#what-is-infrastructure-as-code)
   - [What this bonus lab does](#what-this-bonus-lab-does)
   - [Setting up for the bonus](#setting-up-for-the-bonus)
-  - [The walkthrough](#the-walkthrough)
+  - [Phase 1: Run terraform apply](#phase-1-run-terraform-apply)
+  - [Phase 2: Set the pretty domain (the one thing terraform can't do)](#phase-2-set-the-pretty-domain-the-one-thing-terraform-cant-do)
+  - [Phase 3: Deploy and clean up](#phase-3-deploy-and-clean-up)
   - [Reading the code](#reading-the-code)
   - [What to notice](#what-to-notice)
 - [Quick reference](#quick-reference)
@@ -2326,7 +2328,7 @@ One `terraform apply` recreates Part B's Setup Steps 4–9 in a single command:
 - **`COOLIFY_DEPLOY_WEBHOOK_STAGING`** secret — URL constructed in HCL from the Application UUID (Step 7)
 - **`COOLIFY_DEPLOY_WEBHOOK_PROD`** secret — ditto (Step 9)
 
-**One thing terraform can't do end-to-end**: set the pretty domain (`<your-repo>.ml-capstone.cs.byu.edu`) on each Application. The Coolify terraform provider is still maturing and doesn't model per-service `docker_compose_domains` yet, so you paste the domain into Coolify's UI once per Application — a one-text-field manual step. The `next_steps` terraform output tells you exactly what to paste. The lab's own `terraform/README.md` explains the three-deep chain of API limitations behind this — a real learning moment about "when your provider doesn't cover something, do you fight the tool or document the gap honestly?"
+**Heads up: the lab is two phases, not one.** `terraform apply` gets you 90% of the way there, but there's **one manual UI step** you need to do before pushing any code — setting the pretty domain on each Application. It's a single text field per Application. Phase 2 below explains why (a real provider gap, worth understanding) and walks you through it. Don't skip it; if you do, your app will still work but only on an auto-generated `<uuid>.128.187.112.8.sslip.io` URL instead of the class-wildcard `<your-repo>.ml-capstone.cs.byu.edu`.
 
 ## Setting up for the bonus
 
@@ -2346,7 +2348,7 @@ You'll need:
 
 4. **A GitHub Personal Access Token** with `repo` scope: `gh auth token` if you have the gh CLI, otherwise Settings → Developer settings → Personal access tokens → Tokens (classic) → new token with `repo` scope. Copy immediately.
 
-## The walkthrough
+## Phase 1: Run terraform apply
 
 Everything happens in the `terraform/` directory of your templated repo:
 
@@ -2368,16 +2370,42 @@ terraform plan
 terraform apply
 # Takes ~10 seconds. Watch each resource create.
 
-# Read the next_steps output — tells you the ONE UI click remaining
+# Read the next_steps output — spells out exactly what Phase 2 needs
 terraform output next_steps
 ```
 
-Now the one manual step. In Coolify UI → your Project → **each** Application → Configuration → **Domains** → under the `hello` service, paste the pretty URL (the `terraform output next_steps` message has the exact string). Do this for both staging and production. Save each.
+You now have a Coolify Project, both Environments, both Applications, and all three GitHub Actions secrets. Do NOT push code yet — Phase 2 below is a required step, not a suggestion.
 
-Then trigger the deploy exactly like Part B taught you:
+## Phase 2: Set the pretty domain (the one thing terraform can't do)
+
+> **Don't skip this.** If you do, your app will deploy successfully — but to a Coolify-auto-generated URL like `http://<uuid>.128.187.112.8.sslip.io` instead of the class-wildcard `http://<yourname>-terraform-lab.ml-capstone.cs.byu.edu`. The domain lives on the Coolify Application side, so re-running `terraform apply` won't fix it after the fact.
+
+**Why it's manual.** Three-deep chain of provider/API limitations, all rooted in the Coolify terraform provider being immature:
+
+1. The `bindtech-xyz/coolify` provider only exposes a flat `domains` field on Applications.
+2. Coolify's API rejects that field for `dockercompose` build packs — it requires **per-service** `docker_compose_domains` (which service in your docker-compose.yaml should own the URL).
+3. Coolify's UPDATE endpoint doesn't allow you to write `docker_compose_raw` (the parsed compose contents that `docker_compose_domains` validates against), and the provider doesn't expose it at CREATE time either. So we can't set the domain in a follow-up API call.
+
+Nets out to one text field in the UI per Application. Your lab's `terraform/README.md` documents the three workarounds we tried (a `terraform_data` local-exec provisioner, a `magodo/restful` operation, a two-step PATCH chain) and why each was worse than a UI click. Real IaC teaching moment: sometimes the honest answer is "here's the 90% terraform automates cleanly, plus one documented manual step," not fragile automation that fights the tools.
+
+**What to do.** Once per Application:
+
+1. Coolify UI → your Project (`<yourname>-terraform-lab`)
+2. Click into the **staging** Application
+3. Configuration → **Domains** tab
+4. Under the `hello` service, paste the pretty URL — `terraform output staging_url` in your terminal prints the exact string
+5. **Save** (Coolify won't apply until you click Save)
+
+Repeat for the **production** Application, using `terraform output prod_url` for its domain string.
+
+Verify: both Applications' Domains tabs should now show your pretty class-wildcard URL under the `hello` service. If you see an auto-generated sslip.io URL still, you missed a Save.
+
+## Phase 3: Deploy and clean up
+
+Now trigger the deploy exactly like Part B taught you:
 
 ```bash
-# From your repo root (not the terraform dir):
+# From your repo root (NOT the terraform dir):
 git checkout staging
 git commit --allow-empty -m "trigger first deploy"
 git push origin staging
@@ -2387,7 +2415,7 @@ Watch the GitHub Actions tab run tests → POST the staging webhook → Coolify 
 
 Merge staging → main to trigger the prod deploy.
 
-When you're done exploring:
+When you're done exploring, tear it all down:
 
 ```bash
 cd terraform
