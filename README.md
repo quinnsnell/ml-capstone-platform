@@ -58,14 +58,17 @@ ml-capstone-platform/
 │   ├── verify-qwen-host.sh        Health check on a GPU host post-install
 │   ├── smoke-test-cluster.sh      End-to-end smoke test (run from your laptop over VPN)
 │   ├── provision-teams.sh         Bulk-create Coolify teams+users+servers from roster CSV (runs on rigel)
+│   ├── verify-provisioning.sh     Post-provision check: GitHub + Coolify state per roster row (runs on rigel)
 │   ├── invite-to-org.sh           Invite roster users to the byu-ml-capstone GitHub org (runs on laptop)
-│   └── provision-gh-teams.sh      Create GitHub Teams mirroring Coolify teams + add members (runs on laptop)
+│   ├── provision-gh-teams.sh      Create GitHub Teams mirroring Coolify teams + add members (runs on laptop)
+│   └── repatch-coolify.sh         Reapply the private-github-app team-scoping fix (upstream #11449) after Coolify updates (runs on rigel)
 ├── sentiment-test-app/    Reference app: LLM + local HF, base+app Docker split, integration tests
 ├── testing/
 │   └── test-playground/   Sandbox VS Code workspace to verify Continue + the classroom LLM before real use
 ├── tickets/
-│   ├── active-*.md        Open coordination tickets with CS IT
-│   └── archive/           Historical / resolved tickets
+│   ├── README.md          Index of past + active infrastructure asks
+│   ├── coolify-upstream/  Bugs filed against Coolify itself + local-patch status
+│   └── archive/           Historical / resolved CS IT tickets
 └── roster-*.csv           Class rosters — provision-teams.sh reads these
 ```
 
@@ -96,7 +99,7 @@ Model aliases exposed by LiteLLM:
 - Wildcard DNS `*.ml-capstone.cs.byu.edu` → rigel (delivered 2026-08-11) — group URLs resolve automatically
 - Coolify admin UI at `https://ml-capstone-admin.cs.byu.edu` with GitHub OAuth (invite-gated via `Registration Allowed=off`)
 - Self-serve Coolify Teams per student/group via `scripts/provision-teams.sh` (reads a roster CSV, seeds users + teams + servers)
-- Two starter apps: [`hello-world-app`](https://github.com/byu-ml-capstone/hello-world-app) (template repo — minimal FastAPI for the Coolify onboarding lab) and `sentiment-test-app/` (LLM + local HF reference)
+- Two starter apps: [`hello-world-app`](https://github.com/byu-ml-capstone/hello-world-app) (template repo — minimal FastAPI for the Coolify onboarding lab, plus a bonus `terraform/` directory that recreates the whole Coolify+GitHub wiring as declarative HCL) and `sentiment-test-app/` (LLM + local HF reference)
 - Cluster smoke test hits 14/14
 
 **Planned:**

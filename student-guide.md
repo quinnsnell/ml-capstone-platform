@@ -2279,6 +2279,16 @@ These bypass LiteLLM, so you must change the *model name* in your client from `c
 
 ---
 
+# Bonus: Infrastructure as Code
+
+When you templated your repo from `hello-world-app` (Setup Step 1), you got a `terraform/` directory in the root. That's an optional bonus lab: one `terraform apply` recreates everything you just did through the UI (Setup Steps 4–9) as declarative HCL — Coolify Project, both Environments, both Applications, and all three GitHub Actions secrets, in a single command.
+
+Prerequisite: finish the whole UI-driven flow above at least once. The point of the bonus isn't to replace the UI walkthrough — it's to see the same wiring expressed declaratively, so you understand what IaC actually is.
+
+Start at `terraform/README.md` in your templated repo. The lab documents its own one manual step (setting the pretty domain via Coolify UI — the coolify terraform provider doesn't model per-service domains yet) and the "why" behind each provider choice.
+
+---
+
 # Quick reference
 
 | What | Value |

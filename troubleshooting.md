@@ -80,6 +80,10 @@ Coolify's build container downloads deps fresh each time. Possible issues:
 
 The `COOLIFY_API_TOKEN` secret is wrong or expired. Regenerate the token in Coolify (Keys & Tokens → API Tokens), update the repo secret.
 
+### Terraform bonus lab: `apply` fails with `HTTP 404: Github App not found`
+
+The `coolify_application` resources in `terraform/main.tf` need a specific patch on the class Coolify instance (see [`coolify-runbook.md`](coolify-runbook.md) §16 "Post-install patches" for the full story). Coolify auto-updates or container recreates wipe the patch — ask your instructor to run `scripts/repatch-coolify.sh --apply` on rigel, then retry `terraform apply`.
+
 ### Coolify UI asks for a password when I try to delete something
 
 Coolify's UI prompts for your password on destructive-action confirmations (Delete Application, Delete Project, etc.) even when your session is authenticated via GitHub OAuth. Your instructor set a **class-wide Coolify password** during provisioning — ask them for it and type it into the modal.
