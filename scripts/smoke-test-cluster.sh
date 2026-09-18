@@ -136,6 +136,54 @@ http_ok() {
     [[ $code =~ ^[23] ]]
 }
 
+# Does this endpoint accept tool-calling requests?
+#
+# Agentic clients (opencode, Continue's agent mode, Copilot CLI) send a `tools`
+# array plus tool_choice "auto" on EVERY request. vLLM rejects those unless the
+# engine was started with --enable-auto-tool-choice and a --tool-call-parser.
+# Plain chat and FIM keep working when that is missing, so without this check
+# the whole suite goes green while every agentic client is broken -- which is
+# exactly what happened in September 2026.
+#
+# Run against each GPU host directly as well as the proxy: LiteLLM round-robins,
+# so a proxy-only check passes half the time when one host is misconfigured.
+accepts_tool_calls() {
+    local base_url="$1" model="$2" body out http_code payload
+    body=$(MODEL="$model" python3 -c '
+import json, os
+print(json.dumps({
+    "model": os.environ["MODEL"],
+    "messages": [{"role": "user", "content": "What is the weather in Provo?"}],
+    "tools": [{"type": "function", "function": {
+        "name": "get_weather",
+        "description": "Get the current weather for a city.",
+        "parameters": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+        },
+    }}],
+    "tool_choice": "auto",
+    "max_tokens": 128,
+}))
+')
+    out=$(curl -sS -m "$TIMEOUT" -w '\n%{http_code}' "$base_url/chat/completions" \
+        -H 'Content-Type: application/json' \
+        -H "Authorization: Bearer $API_KEY" \
+        -d "$body" 2>&1) || return 1
+    http_code="${out##*$'\n'}"
+    payload="${out%$'\n'*}"
+    [[ "$http_code" == 200 ]] && return 0
+
+    # A 400 here is almost always the tool-choice rejection. Name the fix.
+    printf 'HTTP %s\n' "$http_code"
+    printf '%s\n' "$payload" | head -2
+    if grep -q 'enable-auto-tool-choice' <<<"$payload"; then
+        printf 'FIX: engine started without tool calling. Re-run install-qwen-cluster.sh\n'
+    fi
+    return 1
+}
+
 # Given a JSON body, extract a field with python (no jq dependency)
 json_get() {
     local field="$1"
@@ -336,6 +384,7 @@ hr
 printf "\n${B}LiteLLM proxy (${PROXY_HOST}:${PROXY_PORT})${Z}\n"
 check "LiteLLM /v1/models lists classroom-chat"          url_contains "http://$PROXY_HOST:$PROXY_PORT/v1/models" "classroom-chat"
 check "LiteLLM /v1/models lists classroom-autocomplete"  url_contains "http://$PROXY_HOST:$PROXY_PORT/v1/models" "classroom-autocomplete"
+check "LiteLLM classroom-chat accepts tool calls"        accepts_tool_calls "http://$PROXY_HOST:$PROXY_PORT/v1" "classroom-chat"
 
 show_chat \
     "classroom-chat coding prompt" \
@@ -354,6 +403,7 @@ for HOST in "$GPU_HOST_A" "$GPU_HOST_B"; do
     printf "\n${B}Direct vLLM (${HOST})${Z}\n"
     check "${HOST}:${CHAT_PORT} /v1/models serves ${CHAT_MODEL##*/}" url_contains "http://$HOST:$CHAT_PORT/v1/models" "$CHAT_MODEL"
     check "${HOST}:${FIM_PORT}  /v1/models serves ${FIM_MODEL##*/}"  url_contains "http://$HOST:$FIM_PORT/v1/models"  "$FIM_MODEL"
+    check "${HOST}:${CHAT_PORT} accepts tool calls"                  accepts_tool_calls "http://$HOST:$CHAT_PORT/v1" "$CHAT_MODEL"
 done
 
 # ---- Coolify UI ---------------------------------------------------------

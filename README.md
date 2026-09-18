@@ -101,7 +101,7 @@ Model aliases exposed by LiteLLM:
 - Coolify admin UI at `https://ml-capstone-admin.cs.byu.edu` with GitHub OAuth (invite-gated via `Registration Allowed=off`)
 - Self-serve Coolify Teams per student/group via `scripts/provision-teams.sh` (reads a roster CSV, seeds users + teams + servers)
 - Two starter apps: [`hello-world-app`](https://github.com/byu-ml-capstone/hello-world-app) (template repo — minimal FastAPI for the Coolify onboarding lab, plus a bonus `terraform/` directory that recreates the whole Coolify+GitHub wiring as declarative HCL) and `sentiment-test-app/` (LLM + local HF reference)
-- Cluster smoke test hits 14/14
+- Cluster smoke test hits 17/17
 
 **Planned:**
 - Self-hosted GitHub Actions runner for integration tests against staging URLs (Phase 18)
@@ -117,7 +117,7 @@ From your laptop on VPN:
 ./scripts/smoke-test-cluster.sh
 ```
 
-Runs 14 checks against LiteLLM, direct-to-vLLM (castor + pollux), Coolify UI, and the deployed reference app. All green means the cluster is healthy.
+Runs 17 checks against LiteLLM, direct-to-vLLM (castor + pollux), Coolify UI, and the deployed reference app. All green means the cluster is healthy.
 
 ---
 

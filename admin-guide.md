@@ -170,7 +170,9 @@ curl http://ml-capstone.cs.byu.edu:4000/v1/models   # should list classroom-chat
 ./smoke-test-cluster.sh --no-sentiment        # skip the sentiment section entirely
 ```
 
-It runs 14 checks: LiteLLM chat + FIM (with the actual prompt and model output printed so you can eyeball quality), direct-to-vLLM on both GPU hosts, Coolify UI reachability, and — if enabled — three sentiment classifications against the reference `sentiment-test-app/`. Every check runs even if earlier ones fail; exit code is non-zero on any failure.
+It runs 17 checks: LiteLLM chat + FIM (with the actual prompt and model output printed so you can eyeball quality), direct-to-vLLM on both GPU hosts, a tool-calling probe against the proxy **and each GPU host individually**, Coolify UI reachability, and — if enabled — three sentiment classifications against the reference `sentiment-test-app/`. Every check runs even if earlier ones fail; exit code is non-zero on any failure.
+
+The tool-calling probes are per-host on purpose. LiteLLM round-robins, so a proxy-only check passes roughly half the time when exactly one engine is misconfigured — which is the shape this failure actually takes.
 
 The reference `sentiment-test-app/` (see its `README.md`) is a small FastAPI service that calls LiteLLM for sentiment classification. It's the canonical "test Coolify deploy" workload — build the Docker image via `docker build`, run locally, deploy to Coolify with a host-port mapping, or eventually via GitHub App push-to-deploy.
 
@@ -255,7 +257,7 @@ Each host's pinned combination lives on the host itself at `/etc/qwen-cluster/pi
 
 **What it changed.** `pin-gpu-host.sh` now exists and both hosts are frozen against unattended updates. The installer no longer aborts on an unrelated broken dpkg state, and no longer exits silently when `nvidia-smi` is broken — that silent exit is what made this take a day instead of an hour.
 
-**What is still unguarded.** `smoke-test-cluster.sh` passes with tool calling broken; it only exercises `/v1/models` and plain completions. A check that posts a real `tools` request would catch a recurrence.
+**What closed the loop.** `smoke-test-cluster.sh` now posts a real `tools` request to the proxy and to each GPU engine directly (17 checks, up from 14). A recurrence fails the smoke test instead of waiting for a student to hit it.
 
 ### Tool calling must be enabled for agentic clients
 
