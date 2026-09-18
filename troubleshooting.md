@@ -168,6 +168,30 @@ Front-end host (rigel) is down or LiteLLM is stopped. Recovery order:
 2. If not: `sudo docker start litellm`; check `sudo docker logs litellm`
 3. If persistent: fall back to direct-to-vLLM on castor/pollux (see student guide's fallback section). Notify students to change their `apiBase`.
 
+### `install-qwen-cluster.sh` aborts in step 1/6 with dpkg errors
+
+Symptom: the run dies at "Installing OS packages" with `E: Sub-process /usr/bin/dpkg returned an error code (1)`, listing kernel packages (`linux-headers-*`, `linux-image-*`) as "not fully installed or removed" — even though every package the script actually wants reports "already the newest version".
+
+The installer isn't the problem. `apt-get install` asks dpkg to configure *all* pending packages first, so any unrelated broken package on the host makes it fail, and the script's `ERR` trap aborts the run. The usual culprit on a GPU host is an NVIDIA DKMS module that won't build against a newly installed kernel.
+
+Step 1 now skips apt entirely when the five required packages are already present, so a pre-existing dpkg mess no longer blocks a model swap. If you're on an older copy of the script, `git pull` and re-run.
+
+**Then deal with the underlying breakage, because it is a latent outage.** If DKMS can't build the NVIDIA module for the new kernel, the host keeps working only until it reboots — at which point it comes up on the new kernel with no GPU driver and both vLLM engines fail to start.
+
+```bash
+uname -r                     # kernel currently running (has a working module)
+dkms status                  # which module versions built for which kernels
+cat /var/lib/dkms/nvidia/<version>/build/make.log   # why the build failed
+```
+
+Hold the kernel packages so the next `apt upgrade` can't widen the gap, then schedule a driver update that supports the new kernel:
+
+```bash
+sudo apt-mark hold linux-image-generic-hwe-24.04 linux-headers-generic-hwe-24.04 linux-generic-hwe-24.04
+```
+
+Do not reboot the host until `dkms status` shows the module built for the kernel it would boot into.
+
 ### Coolify UI unreachable
 
 - rigel:8000 not responding: check `sudo docker ps` on rigel for `coolify` container

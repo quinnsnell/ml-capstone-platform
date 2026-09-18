@@ -297,8 +297,22 @@ trap _on_err ERR
 # ---- 1. OS packages ------------------------------------------------------
 step "Installing OS packages"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y python3 python3-venv python3-pip git curl
+# Only touch apt if something is actually missing. A GPU host with an unrelated
+# broken dpkg state (e.g. an NVIDIA DKMS module failing to build against a newly
+# installed kernel) makes *any* apt-get install fail, since dpkg tries to
+# configure the pending packages first. That must not block a model swap.
+REQUIRED_PKGS=(python3 python3-venv python3-pip git curl)
+MISSING_PKGS=()
+for _pkg in "${REQUIRED_PKGS[@]}"; do
+    dpkg -s "$_pkg" >/dev/null 2>&1 || MISSING_PKGS+=("$_pkg")
+done
+if (( ${#MISSING_PKGS[@]} )); then
+    echo "Installing missing packages: ${MISSING_PKGS[*]}"
+    apt-get update
+    apt-get install -y "${MISSING_PKGS[@]}"
+else
+    echo "All required OS packages already present - skipping apt."
+fi
 
 # ---- 2. Service user + install directory --------------------------------
 step "Preparing service user and install dir"
