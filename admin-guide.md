@@ -201,6 +201,39 @@ Because the front-end LiteLLM exposes stable aliases (`classroom-chat`, `classro
 
     If you skip step 2, the front-end LiteLLM will still route requests, but with the wrong model name in its upstream call — vLLM will 404 because it no longer serves the old model id.
 
+### GPU host update policy
+
+`castor` and `pollux` run the same OS and the same package set, but they have **different motherboards and different GPU configurations**, so each needs its own NVIDIA driver. Do not try to make the driver versions match — per-host divergence is correct here. What must be true is that each host stays on the combination known to work for *its* hardware.
+
+**The failure mode is silent and delayed.** An unattended update bumps the NVIDIA userspace libraries or stages a new kernel. Everything keeps running on the already-loaded module, so nothing looks wrong — the smoke test stays green. The damage only appears at the next reboot, possibly months later, when the host comes up with no usable GPU and both vLLM engines fail to start. Both GPU hosts reached that state undetected in September 2026.
+
+**Freeze each host once, while it is healthy:**
+
+```bash
+sudo ./scripts/pin-gpu-host.sh --freeze
+```
+
+That records the running kernel, the loaded module version, and the GPU models to `/etc/qwen-cluster/pinned-state.conf`, holds the kernel metapackages and every installed `nvidia-*` / `libnvidia-*` package, and blacklists them from unattended-upgrades.
+
+**Verify any time** (read-only, exits non-zero on drift, safe for cron):
+
+```bash
+sudo ./scripts/pin-gpu-host.sh
+```
+
+It checks that nvidia-smi actually works, that the live kernel and driver still match the pin, that **every installed kernel has a DKMS module built** — the check that catches a reboot bomb while it is still harmless — that the holds and blacklist survive, that dpkg is in a clean state, and that both engines are active.
+
+**When you do want to upgrade a driver or kernel**, treat it as a scheduled operation, never an incidental one:
+
+1. Confirm the *other* host is healthy — LiteLLM pools both, so one can be down without taking the class offline. Never work on both in the same window.
+2. `sudo apt-mark unhold` the packages you intend to move on the host being upgraded.
+3. Upgrade, then confirm `dkms status` shows a module built for the kernel that would boot.
+4. Reboot, verify `nvidia-smi`, verify both engines start.
+5. `sudo ./scripts/pin-gpu-host.sh --freeze` to record the new known-good state.
+6. Only then move to the other host.
+
+If a host ever boots into a kernel with no module, recover by selecting the previous kernel in GRUB's *Advanced options for Ubuntu* — don't try to rebuild drivers from a console with the class waiting.
+
 ### Tool calling must be enabled for agentic clients
 
 opencode, Continue's agent mode, and Copilot CLI all send a `tools` array with `tool_choice: "auto"` on every request. vLLM rejects those unless the chat engine was launched with **both** `--enable-auto-tool-choice` and a `--tool-call-parser`, and LiteLLM surfaces the rejection to the student as:

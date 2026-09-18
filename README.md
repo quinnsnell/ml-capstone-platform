@@ -57,6 +57,7 @@ ml-capstone-platform/
 │   ├── uninstall-qwen-cluster.sh  Reverse of the above
 │   ├── verify-qwen-host.sh        Health check on a GPU host post-install
 │   ├── smoke-test-cluster.sh      End-to-end smoke test (run from your laptop over VPN)
+│   ├── pin-gpu-host.sh           Freeze/verify a GPU host's kernel + NVIDIA driver pin
 │   ├── provision-teams.sh         Bulk-create Coolify teams+users+servers from roster CSV (runs on rigel)
 │   ├── verify-provisioning.sh     Post-provision check: GitHub + Coolify state per roster row (runs on rigel)
 │   ├── invite-to-org.sh           Invite roster users to the byu-ml-capstone GitHub org (runs on laptop)
