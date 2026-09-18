@@ -234,6 +234,29 @@ It checks that nvidia-smi actually works, that the live kernel and driver still 
 
 If a host ever boots into a kernel with no module, recover by selecting the previous kernel in GRUB's *Advanced options for Ubuntu* — don't try to rebuild drivers from a console with the class waiting.
 
+### Recorded host state, and the September 2026 incident
+
+Each host's pinned combination lives on the host itself at `/etc/qwen-cluster/pinned-state.conf` (`pin-gpu-host.sh --show`). Recorded here as well so the intended state survives a host being rebuilt:
+
+| | castor | pollux |
+|---|---|---|
+| Kernel | `7.0.0-31-generic` | `6.17.0-23-generic` |
+| NVIDIA driver | 580.173.02 | 590.48.01 |
+| GPUs | 2× RTX PRO 6000 Blackwell | 2× RTX PRO 6000 Blackwell Max-Q |
+| Pinned | 2026-09-18 | 2026-09-18 |
+
+**These are not supposed to match.** Different motherboards and GPU configurations mean each host needs its own driver. Never "fix" the divergence.
+
+**What happened.** A student-facing opencode session failed with a vLLM tool-choice error. Chasing it surfaced three unrelated problems that had all been silently true for some time:
+
+1. **Tool calling was never enabled** on the Qwen chat engines — the `glm-45-air` profile set the flags, the `qwen3-coder` profiles didn't. Plain chat and FIM worked, so nothing looked wrong.
+2. **castor's driver was already broken** — `nvidia-smi` reported a driver/library version mismatch. The engines kept serving off the loaded module, so the outage was invisible until someone tried to restart something. A reboot fixed it.
+3. **pollux had a staged kernel with no NVIDIA module** (`7.0.0-31-generic`, which its 590 driver cannot build against). It was one reboot away from coming up with no GPUs. That kernel was removed; pollux stays on 6.17 until a 590-branch release supports 7.0. castor demonstrates the kernel itself is fine — the incompatibility is driver-branch-specific.
+
+**What it changed.** `pin-gpu-host.sh` now exists and both hosts are frozen against unattended updates. The installer no longer aborts on an unrelated broken dpkg state, and no longer exits silently when `nvidia-smi` is broken — that silent exit is what made this take a day instead of an hour.
+
+**What is still unguarded.** `smoke-test-cluster.sh` passes with tool calling broken; it only exercises `/v1/models` and plain completions. A check that posts a real `tools` request would catch a recurrence.
+
 ### Tool calling must be enabled for agentic clients
 
 opencode, Continue's agent mode, and Copilot CLI all send a `tools` array with `tool_choice: "auto"` on every request. vLLM rejects those unless the chat engine was launched with **both** `--enable-auto-tool-choice` and a `--tool-call-parser`, and LiteLLM surfaces the rejection to the student as:

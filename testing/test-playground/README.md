@@ -12,7 +12,7 @@ Everywhere else (other projects), your global preferences apply — Copilot on, 
 
 1. Connected to BYU VPN
 2. Continue extension installed
-3. `~/.continue/config.yaml` has the Classroom block from the Student Guide §Option 1 Step 3
+3. `~/.continue/config.yaml` has the Classroom block from the Student Guide §Option 2 Step 3
 4. Signed **out** of Continue Hub if you were auto-signed-in — Hub assistants shadow local config
 5. This folder opened as the workspace root — the shipped `.vscode/settings.json` disables Copilot and enables Continue autocomplete only when this is the workspace root
 6. Reload VS Code once after any of the above

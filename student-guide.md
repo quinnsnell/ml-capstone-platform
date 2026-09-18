@@ -12,9 +12,9 @@ You can use either capability or both. This guide walks you through setting up e
 - [Before you start](#before-you-start)
   - [Platform notes — read this if you're on Windows](#platform-notes--read-this-if-youre-on-windows)
 - **Part A — AI coding in your editor**
-  - [Option 1: VS Code + Continue (recommended)](#option-1-vs-code--continue-recommended)
-  - [Option 2: Continue chat + GitHub Copilot autocomplete](#option-2-continue-chat--github-copilot-autocomplete)
-  - [Option 3: Terminal + opencode](#option-3-terminal--opencode)
+  - [Option 1: opencode — desktop app or terminal](#option-1-opencode--desktop-app-or-terminal)
+  - [Option 2: VS Code + Continue](#option-2-vs-code--continue)
+  - [Option 3: Continue chat + GitHub Copilot autocomplete](#option-3-continue-chat--github-copilot-autocomplete)
   - [Option 4: VS Code + GitHub Copilot BYOK](#option-4-vs-code--github-copilot-byok)
 - **Part B — Deploying your app via CI/CD**
   - [The overall flow](#the-overall-flow) — architecture diagram + who does what
@@ -123,18 +123,129 @@ Both aliases stay stable even if your instructor swaps the underlying model.
 
 ## Which client should I use?
 
-Pick whichever you're most comfortable with. If you don't have a preference, **Continue** covers both chat and autocomplete cleanly.
+These do different jobs, and plenty of students run two of them. **opencode** is an agent: it reads your files, proposes edits, and works through multi-step tasks. **Continue** puts chat and inline ghost-text inside VS Code. If you want one thing that does everything in the editor, use Continue. If you want an assistant that can actually carry out a task, use opencode. They coexist fine.
 
-| Client                                  | Chat via cluster | Autocomplete           | Notes                                            |
-|-----------------------------------------|------------------|------------------------|--------------------------------------------------|
-| **Continue** (VS Code)                  | Yes              | Yes (from cluster)     | Recommended — one extension, both features       |
-| **Continue chat + Copilot autocomplete**| Yes              | Yes (from GitHub)      | Keep Copilot's autocomplete if you already like it; use Continue for chat |
-| **opencode** (terminal)                 | Yes              | n/a — chat only        | Good for terminal-first workflows                |
-| **Copilot BYOK** (VS Code)              | Yes              | Yes (from GitHub)      | Requires Copilot subscription; chat via cluster   |
+| Client                                   | Chat via cluster | Agentic edits | Autocomplete       | Notes                                                       |
+|------------------------------------------|------------------|---------------|--------------------|-------------------------------------------------------------|
+| **opencode** (desktop app or terminal)   | Yes              | Yes           | n/a                | Desktop GUI, terminal, or browser — same engine and config   |
+| **Continue** (VS Code)                   | Yes              | Limited       | Yes (from cluster) | One extension, chat + ghost-text in the editor               |
+| **Continue chat + Copilot autocomplete** | Yes              | Limited       | Yes (from GitHub)  | Keep Copilot's ghost-text if you already like it             |
+| **Copilot BYOK** (VS Code)               | Yes              | Limited       | Yes (from GitHub)  | Requires a Copilot subscription; chat routed via the cluster |
 
 ---
 
-## Option 1: VS Code + Continue (recommended)
+## Option 1: opencode — desktop app or terminal
+
+[opencode](https://opencode.ai) is an *agentic* coding assistant: it reads your files, proposes edits, runs commands, and works through multi-step tasks — similar to Claude Code, but pointed at the classroom cluster instead of a commercial API.
+
+It comes in three forms that all share one engine and one config file:
+
+- **Desktop app** — a normal windowed application (macOS and Windows). Start here if you don't live in a terminal.
+- **Terminal (TUI)** — `opencode` in any shell.
+- **Browser** — `opencode web` starts a local server and opens a tab. No extra install.
+
+It does **not** do inline ghost-text. If you want autocomplete in your editor too, add Option 2 alongside it — they don't conflict.
+
+> The desktop app is currently a **beta**. If it misbehaves, the terminal version is the same assistant with a different front end.
+
+### 1. Install
+
+**macOS** — desktop app, terminal, or both:
+
+```bash
+brew install --cask opencode-desktop    # GUI app
+brew install opencode                   # terminal
+```
+
+**Windows** — download the Windows installer from [opencode.ai/download](https://opencode.ai/download) and run it like any other app.
+
+If you also want the terminal version on Windows, install it **inside WSL** (opencode's docs recommend WSL over native Windows for filesystem performance and terminal support):
+
+```bash
+curl -fsSL https://opencode.ai/install | bash
+```
+
+Keep your project in the WSL filesystem (`~/capstone`, not `/mnt/c/Users/...`) and run `opencode` from that same WSL shell.
+
+**Linux:**
+
+```bash
+curl -fsSL https://opencode.ai/install | bash
+```
+
+### 2. Point it at the classroom cluster
+
+opencode reads a global config from `~/.config/opencode/opencode.json` on every platform. Create it with this content:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "classroom": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Classroom Cluster",
+      "options": {
+        "baseURL": "http://ml-capstone.cs.byu.edu:4000/v1",
+        "apiKey": "sk-noauth"
+      },
+      "models": {
+        "classroom-chat": {
+          "name": "Classroom Chat",
+          "limit": { "context": 131072, "output": 32768 }
+        }
+      }
+    }
+  }
+}
+```
+
+**Where that file goes depends on which opencode you installed:**
+
+| You installed | Config path |
+|---|---|
+| macOS (desktop app and/or terminal) | `~/.config/opencode/opencode.json` |
+| Windows **desktop app** | `%USERPROFILE%\.config\opencode\opencode.json` — i.e. `C:\Users\you\.config\opencode\` |
+| Windows **terminal in WSL** | `~/.config/opencode/opencode.json` *inside WSL* |
+
+> **Windows students running both the desktop app and the WSL terminal need this file in two places.** The Windows app and your WSL shell have different home directories, so a config in one is invisible to the other. This is the same trap as Continue's config — see *Before you start → Platform notes*.
+
+Creating the file from scratch:
+
+```bash
+# macOS, Linux, or a WSL shell
+mkdir -p ~/.config/opencode
+nano ~/.config/opencode/opencode.json
+```
+
+```powershell
+# Windows PowerShell, for the desktop app
+mkdir -Force $env:USERPROFILE\.config\opencode
+notepad $env:USERPROFILE\.config\opencode\opencode.json
+```
+
+A `.jsonc` file works too if you want to leave yourself comments.
+
+### 3. Select the model
+
+- **Desktop app:** open the model picker and choose **Classroom Cluster › Classroom Chat**.
+- **Terminal:** run `opencode`, type `/models`, pick **Classroom Cluster › Classroom Chat**.
+
+### 4. Verify it works
+
+Connect to the CS VPN first (see *Before you start* — `cs-vpn.byu.edu`, not the campus VPN). Then ask it something small, like *"what files are in this directory?"* — an agentic request, not just chat, since that exercises the tool-calling path.
+
+You should get a real answer within a few seconds.
+
+### If it doesn't work
+
+- **`litellm.BadRequestError` mentioning `--enable-auto-tool-choice`** — a server-side setting on the cluster, nothing you can fix in your config. Tell your instructor; plain chat keeps working in the meantime.
+- **Requests hang, or the model list is empty** — VPN. `curl http://ml-capstone.cs.byu.edu:4000/v1/models` should return JSON naming `classroom-chat`.
+- **The model picker doesn't show Classroom Cluster** — opencode isn't reading your config. On Windows this is almost always the file being in your WSL home when the desktop app wanted `%USERPROFILE%`, or vice versa.
+- **Don't add `classroom-autocomplete` to this config.** It's a fill-in-the-middle model for editor ghost-text, with no instruct tuning and no tool-calling ability — as an opencode agent model it produces nonsense rather than a clean error. It belongs in Continue's config (Option 2), not here.
+
+---
+
+## Option 2: VS Code + Continue
 
 Both chat and inline ghost-text come from the classroom cluster in one extension.
 
@@ -154,7 +265,7 @@ Copilot and Continue both draw inline ghost-text and fight over the same slot. I
 
 Then `Cmd+Shift+P` / `Ctrl+Shift+P` → **Developer: Reload Window**.
 
-(If you'd rather **keep Copilot's autocomplete** and only use Continue for chat, skip this step and use Option 2 instead.)
+(If you'd rather **keep Copilot's autocomplete** and only use Continue for chat, skip this step and use Option 3 instead.)
 
 ### 3. Create the Continue config
 
@@ -231,71 +342,15 @@ Both working = you're set.
 
 ---
 
-## Option 2: Continue chat + GitHub Copilot autocomplete
+## Option 3: Continue chat + GitHub Copilot autocomplete
 
 If you like Copilot's ghost-text and just want the classroom cluster for chat:
 
-1. **Keep Copilot enabled** as normal (don't do step 2 of Option 1).
-2. Set up Continue exactly as Option 1, **but change the autocomplete model in `~/.continue/config.yaml`** — remove the `- name: Classroom Autocomplete` block entirely so Continue doesn't try to also do ghost-text. Your YAML has only the Classroom Chat model.
+1. **Keep Copilot enabled** as normal (don't do step 2 of Option 2).
+2. Set up Continue exactly as Option 2, **but change the autocomplete model in `~/.continue/config.yaml`** — remove the `- name: Classroom Autocomplete` block entirely so Continue doesn't try to also do ghost-text. Your YAML has only the Classroom Chat model.
 3. In VS Code, both extensions coexist: Copilot handles inline autocomplete (from GitHub's servers), Continue handles the chat panel (from the classroom cluster).
 
 Trade-off: Copilot's autocomplete needs internet access + a Copilot subscription. The classroom cluster's chat is free and stays on VPN.
-
----
-
-## Option 3: Terminal + opencode
-
-[opencode](https://opencode.ai) is a terminal-based agentic assistant, similar to Claude Code but pointed at any OpenAI-compatible endpoint. Chat-only, no editor autocomplete.
-
-### Install
-
-**macOS:**
-
-```bash
-brew install opencode
-```
-
-**Windows:** use WSL. opencode runs natively on Windows, but its own docs recommend WSL for better filesystem performance and full terminal support. [Install WSL](https://learn.microsoft.com/windows/wsl/install), then from a **WSL terminal** (not PowerShell):
-
-```bash
-curl -fsSL https://opencode.ai/install | bash
-```
-
-Keep your project inside the WSL filesystem (`~/capstone`, not `/mnt/c/Users/...`) — working across the Windows drive mount is noticeably slower. Run `opencode` from that same WSL terminal.
-
-**Linux, or any platform without a package manager:**
-
-```bash
-curl -fsSL https://opencode.ai/install | bash
-```
-
-### Configure
-
-Create `~/.config/opencode/opencode.json` (on Windows that's your **WSL** home directory, not `C:\Users\you\`):
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "classroom": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "Classroom Cluster",
-      "options": {
-        "baseURL": "http://ml-capstone.cs.byu.edu:4000/v1",
-        "apiKey": "sk-noauth"
-      },
-      "models": {
-        "classroom-chat": {
-          "name": "Classroom Chat",
-          "limit": { "context": 131072 }
-        }
-      }
-    }
-  }
-}
-```
-
-Then run `opencode`. In the TUI, `/models` and pick **Classroom Cluster › Classroom Chat**.
 
 ---
 
@@ -2323,8 +2378,8 @@ Named volumes live on rigel's disk. If rigel dies, they're gone unless someone h
 ## LLM (editor) doesn't respond
 
 - **You're off VPN.** `curl http://ml-capstone.cs.byu.edu:4000/v1/models` should return JSON. If it fails, fix VPN before touching editor config.
-- **Continue on wrong assistant.** See "If you get stuck" in Option 1.
-- **Copilot fighting Continue** — see Option 1 step 2.
+- **Continue on wrong assistant.** See "If you get stuck" in Option 2.
+- **Copilot fighting Continue** — see Option 2 step 2.
 
 ## Deploy doesn't happen after push
 
