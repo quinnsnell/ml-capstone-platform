@@ -181,11 +181,15 @@ If it reports `Failed to initialize NVML: Driver/library version mismatch`, that
 **The mismatch itself** means the NVIDIA packages on disk were upgraded while an older kernel module is still loaded. Rebooting loads the new module and is the normal fix — but confirm DKMS built it for the kernel you'd boot into *first*:
 
 ```bash
-dkms status          # module versions vs kernels
-uname -r             # what's running now
+uname -r                                   # what's running now
+ls -1 /boot/vmlinuz-* | sort -V | tail -1  # what GRUB would boot next
+modinfo -k <that kernel> nvidia            # does it have a module?
+sudo ./scripts/pin-gpu-host.sh             # checks all of the above
 ```
 
-If DKMS has no module for the kernel that would boot, the host comes back with no GPU at all and both vLLM engines fail to start. Recover by selecting the previous kernel in GRUB's "Advanced options" at boot, then fix DKMS before trying again.
+Use `modinfo`, not `dkms status` — a driver shipped as a precompiled signed module is perfectly usable but invisible to DKMS. And check the kernel that would *boot*, not every directory under `/lib/modules`: hosts accumulate leftovers from long-removed kernels, and those are clutter rather than risk.
+
+If the next-boot kernel has no module, the host comes back with no GPU at all and both vLLM engines fail to start. Either build the module for it or remove that kernel (`sudo apt-get remove --purge linux-image-<ver> linux-headers-<ver>`) before rebooting. If you're already stuck at that point, select the previous kernel in GRUB's "Advanced options" at boot.
 
 Because LiteLLM pools both GPU hosts, one host can be down for this without taking the class offline — as long as the other one is healthy. Never reboot both at once.
 

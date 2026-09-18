@@ -213,25 +213,59 @@ else
     warn "no pin recorded -- run: sudo $0 --freeze (while this host is healthy)"
 fi
 
-# 3. A module exists for every installed kernel, not just the running one.
+# 3. The kernel this host would BOOT INTO has a usable nvidia module.
 #    This is the check that catches the reboot bomb while it is still harmless.
-if command -v dkms >/dev/null 2>&1; then
-    UNBUILT=()
-    while read -r kver; do
-        [[ -n "$kver" ]] || continue
-        dkms status 2>/dev/null | grep -q "$kver" || UNBUILT+=("$kver")
-    done < <(ls -1 /lib/modules 2>/dev/null)
+#
+#    Deliberately narrow. /lib/modules accumulates directories for kernels that
+#    were removed long ago; those are clutter, not risk, and flagging them
+#    buries the one kernel that actually matters. What matters is the kernel
+#    GRUB would pick next -- approximated by the highest-versioned vmlinuz in
+#    /boot, which is GRUB's default ordering.
+#
+#    Uses modinfo rather than `dkms status`, so a driver shipped as a
+#    precompiled/signed module counts as present. dkms status only sees
+#    DKMS-built modules and would report a false failure on such a host.
+has_nvidia_module() { modinfo -k "$1" nvidia >/dev/null 2>&1; }
 
-    if ((${#UNBUILT[@]} == 0)); then
-        ok "every installed kernel has a DKMS module built"
-    else
-        bad "no DKMS module for installed kernel(s): ${UNBUILT[*]}"
-        note "If the host boots one of these it comes up with NO GPU and both"
-        note "vLLM engines fail. Remove that kernel, or build the module, BEFORE"
-        note "the next reboot. See troubleshooting.md."
-    fi
+NEXT_KERNEL=$(ls -1 /boot/vmlinuz-* 2>/dev/null |
+    sed 's|.*/vmlinuz-||' | sort -V | tail -n1)
+
+if has_nvidia_module "$RUNNING_KERNEL"; then
+    ok "running kernel $RUNNING_KERNEL has an nvidia module"
 else
-    warn "dkms not installed -- cannot verify modules for installed kernels"
+    bad "running kernel $RUNNING_KERNEL has NO nvidia module"
+    note "The GPUs are working off an already-loaded module; this host will"
+    note "lose them on the next reboot."
+fi
+
+if [[ -z "$NEXT_KERNEL" ]]; then
+    warn "could not determine the next-boot kernel from /boot"
+elif [[ "$NEXT_KERNEL" == "$RUNNING_KERNEL" ]]; then
+    ok "next-boot kernel is the running one ($NEXT_KERNEL)"
+elif has_nvidia_module "$NEXT_KERNEL"; then
+    ok "next-boot kernel $NEXT_KERNEL has an nvidia module"
+    note "Newer than the running $RUNNING_KERNEL -- a reboot will switch to it."
+else
+    bad "next-boot kernel $NEXT_KERNEL has NO nvidia module"
+    note "This host is running fine on $RUNNING_KERNEL but would come up on"
+    note "$NEXT_KERNEL with no GPU, and both vLLM engines would fail to start."
+    note "Before the next reboot, either build the module for it or remove it:"
+    note "  sudo apt-get remove --purge linux-image-$NEXT_KERNEL linux-headers-$NEXT_KERNEL"
+    note "See troubleshooting.md."
+fi
+
+# Stale /lib/modules directories are cosmetic, but a large pile usually means
+# old kernels are also still occupying /boot, which eventually breaks upgrades.
+STALE=0
+while read -r kver; do
+    [[ -n "$kver" ]] || continue
+    [[ "$kver" == "$RUNNING_KERNEL" || "$kver" == "$NEXT_KERNEL" ]] && continue
+    [[ -e "/boot/vmlinuz-$kver" ]] && continue
+    STALE=$((STALE+1))
+done < <(ls -1 /lib/modules 2>/dev/null)
+if (( STALE > 0 )); then
+    note "$STALE stale /lib/modules dir(s) for kernels no longer in /boot."
+    note "Harmless, but 'sudo apt-get autoremove --purge' tidies them up."
 fi
 
 # 4. Holds still in place (an admin may have cleared them and forgotten).
