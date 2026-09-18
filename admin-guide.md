@@ -201,6 +201,25 @@ Because the front-end LiteLLM exposes stable aliases (`classroom-chat`, `classro
 
     If you skip step 2, the front-end LiteLLM will still route requests, but with the wrong model name in its upstream call — vLLM will 404 because it no longer serves the old model id.
 
+### Tool calling must be enabled for agentic clients
+
+opencode, Continue's agent mode, and Copilot CLI all send a `tools` array with `tool_choice: "auto"` on every request. vLLM rejects those unless the chat engine was launched with **both** `--enable-auto-tool-choice` and a `--tool-call-parser`, and LiteLLM surfaces the rejection to the student as:
+
+```
+litellm.BadRequestError: OpenAIException - "auto" tool choice requires
+--enable-auto-tool-choice and --tool-call-parser to be set.
+```
+
+Every profile in `install-qwen-cluster.sh` therefore carries the right parser in `CHAT_EXTRA_ARGS`: `qwen3_xml` for the Qwen3-Coder profiles, `glm45` for GLM-4.5-Air. **If you add a profile or pass `--chat-model` by hand, you must supply the parser matching that model family** — otherwise plain chat works, autocomplete works, the 14-check smoke test passes, and only agentic clients break. That asymmetry makes this easy to ship broken.
+
+Parser names are vLLM-version-specific. Check what a given build accepts with:
+
+```bash
+/opt/qwen-cluster/venv/bin/python -m vllm.entrypoints.openai.api_server --help | grep -A20 'tool-call-parser'
+```
+
+Note the FIM engine needs none of this — `classroom-autocomplete` is a base completion model and never receives tools.
+
 ### Rolling back a bad install
 
 If something goes wrong and you want a clean slate, run `uninstall-qwen-cluster.sh` on the affected machine. It stops the services, removes their unit files, deletes `/opt/qwen-cluster`, removes the `qwen` user, and drops the ufw rules — reversing everything the installer did.

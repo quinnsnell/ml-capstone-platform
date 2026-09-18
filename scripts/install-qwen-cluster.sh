@@ -59,14 +59,14 @@ _apply_profile() {
         qwen3-coder)
             CHAT_MODEL="Qwen/Qwen3-Coder-Next-FP8"
             FIM_MODEL="Qwen/Qwen2.5-Coder-7B"
-            CHAT_EXTRA_ARGS=""
+            CHAT_EXTRA_ARGS="--enable-auto-tool-choice --tool-call-parser qwen3_xml"
             FIM_EXTRA_ARGS=""
             CHAT_MAX_LEN=131072
             ;;
         qwen3-coder-30b)
             CHAT_MODEL="Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8"
             FIM_MODEL="Qwen/Qwen2.5-Coder-7B"
-            CHAT_EXTRA_ARGS=""
+            CHAT_EXTRA_ARGS="--enable-auto-tool-choice --tool-call-parser qwen3_xml"
             FIM_EXTRA_ARGS=""
             CHAT_MAX_LEN=131072
             ;;

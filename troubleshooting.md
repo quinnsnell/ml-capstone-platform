@@ -33,6 +33,38 @@ Should return a JSON list including `classroom-chat` and `classroom-autocomplete
 - Try `nslookup ml-capstone.cs.byu.edu` — expect an internal IP (e.g., `10.55.x.x`)
 - If still broken, LiteLLM may be down — see admin section below
 
+### opencode (or any agentic client) fails with "auto tool choice requires --enable-auto-tool-choice"
+
+Full error, as surfaced through LiteLLM:
+
+```
+litellm.BadRequestError: OpenAIException - "auto" tool choice requires
+--enable-auto-tool-choice and --tool-call-parser to be set.
+Received Model Group=classroom-chat
+```
+
+Nothing is wrong with your client config. Agentic clients (opencode, Continue's agent mode, Copilot CLI) send a `tools` array plus `tool_choice: "auto"` on every request. The vLLM chat engine only accepts those if it was started with tool-calling enabled — this is a **server-side** setting on `castor` and `pollux`, so report it rather than trying to fix it locally.
+
+Plain chat with no tools still works while this is broken, which is why Continue's chat panel can look healthy while opencode fails on the first message.
+
+**Admin fix.** The `qwen3-coder*` profiles in `scripts/install-qwen-cluster.sh` pass `--enable-auto-tool-choice --tool-call-parser qwen3_xml` in `CHAT_EXTRA_ARGS`. If an engine predates that change, re-run the installer on each GPU host:
+
+```bash
+sudo ./install-qwen-cluster.sh --profile qwen3-coder
+```
+
+Confirm the running unit actually has the flags:
+
+```bash
+systemctl cat qwen-chat | grep -E 'tool-call-parser|enable-auto-tool-choice'
+```
+
+If vLLM rejects `qwen3_xml` as an invalid choice, that build is too old for it — check what it accepts with
+`/opt/qwen-cluster/venv/bin/python -m vllm.entrypoints.openai.api_server --help | grep -A20 'tool-call-parser'`
+and fall back to `--tool-call-parser qwen3_coder`. vLLM's own docs recommend `qwen3_xml` for Qwen3-Coder; the older `qwen3_coder` parser has a known failure where long tool-call inputs degenerate into an endless `!!!!!!` stream.
+
+**Do not add `classroom-autocomplete` to an agentic client's model list.** It's Qwen2.5-Coder-7B *base* — a fill-in-the-middle completion model with no instruct tuning and no tool-calling ability. It's correct for ghost-text in Continue and useless as an opencode agent model.
+
 ### No inline ghost-text (autocomplete)
 
 - Copilot might be enabled and competing with Continue → disable Copilot in this workspace
