@@ -280,11 +280,20 @@ HELD=$(apt-mark showhold 2>/dev/null | grep -cE '^(linux-|nvidia-|libnvidia-)' |
 
 # 5. dpkg is in a clean state. A half-configured package makes every later
 #    apt-get invocation fail, which is what blocked the installer on pollux.
-if dpkg-query -W -f '${Package} ${Status}\n' 2>/dev/null |
-        grep -qvE '(install ok installed|deinstall ok config-files|unknown ok not-installed)$'; then
+# dpkg Status is three fields: <desired> <error> <status>. Anything settled --
+# installed, not-installed, config-files -- is fine regardless of what the
+# admin asked for, so a purged package is not a problem. Only an error flag or
+# an unsettled status (half-configured, unpacked, half-installed, triggers-*)
+# actually blocks later apt-get runs, which is what stalled the installer here.
+DPKG_BROKEN=$(dpkg-query -W -f '${Package} ${Status}\n' 2>/dev/null |
+    awk '$3 != "ok" || ($4 != "installed" && $4 != "not-installed" && $4 != "config-files")' || true)
+
+if [[ -n "$DPKG_BROKEN" ]]; then
     bad "dpkg has packages in a broken/half-configured state"
-    note "Every apt-get install on this host will fail until it is cleared:"
-    note "  dpkg-query -W -f '\${Package} \${Status}\\n' | grep -v 'ok installed'"
+    while read -r line; do
+        [[ -n "$line" ]] && note "$line"
+    done <<< "$DPKG_BROKEN"
+    note "Every apt-get install on this host fails until this clears:"
     note "  sudo dpkg --configure -a"
 else
     ok "dpkg state is clean"
