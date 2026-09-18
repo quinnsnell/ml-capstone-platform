@@ -19,6 +19,24 @@ Before you onboard anyone, verify the following are live (most of these were set
 - The `byu-ml-capstone/hello-world-app` template repo exists and is marked as a Template
 - Registration Allowed = OFF in Coolify Settings → Advanced (invite-only OAuth)
 - `gh` CLI installed and authenticated as an org Owner (`gh auth refresh -h github.com -s admin:org` if you need admin scope)
+- A known-good process with CS IT for granting **CS VPN** access to enrolled students (see the next section — this is the one prerequisite that isn't self-service)
+
+---
+
+## Term-start: request CS VPN access for the roster
+
+**Do this first — before anything else, and before the first class meeting.** It's the only onboarding step with an external dependency and a turnaround time you don't control, and nothing else in the class works without it.
+
+Students need **`cs-vpn.byu.edu`**, not the campus `vpn.byu.edu` gateway. CS VPN access is an entitlement separate from a student's NetID and separate from their enrollment in the course — a student can be fully registered, hold a valid NetID, connect to the campus VPN, and still not reach the cluster. Every symptom then looks like a broken editor config, which burns an entire first lab.
+
+> **⚠️ Fill in the mechanism.** The exact CS IT process (who to email, whether it's roster-based or per-student, whether it keys off a CS account or a group membership, expected turnaround) is **not yet recorded here**. Document it the first time you run it so the next instructor doesn't rediscover it. A draft request is in [`tickets/2026-09-15-cs-vpn-access-for-class-roster.md`](tickets/2026-09-15-cs-vpn-access-for-class-roster.md).
+
+Practical notes:
+
+- **Submit the full roster at once**, then handle adds individually as students join in the first two weeks. Late adds are the common failure case.
+- **Expect stragglers.** Have students verify access on day one with `curl -sS http://ml-capstone.cs.byu.edu:4000/v1/models` rather than discovering the gap mid-lab.
+- **Non-CS majors are the usual gap.** A capstone or cross-listed section may include students with no prior CS account; those are the ones most likely to need provisioning from scratch.
+- Students are told in [`student-guide.md`](student-guide.md) → *Before you start* to route VPN access problems to **you**, not to BYU IT.
 
 ---
 
@@ -143,10 +161,11 @@ The instructor does NOT create Applications or Deploy Webhooks. Students do this
 
 ## Off-boarding a group / student (end of semester)
 
-1. **Coolify:** delete the team via UI → Team → Danger Zone (or directly in Postgres — a `provision-teams.sh --cleanup` mode is on the roadmap as Phase 21).
-2. **GitHub org:** remove the user from org → **People** → **Remove from org** (via UI or `gh api DELETE /orgs/byu-ml-capstone/members/<username>`).
-3. **GitHub Teams:** deleting the org member auto-removes them from all Teams. Team itself can be deleted via `gh api DELETE /orgs/byu-ml-capstone/teams/<slug>` if unused.
-4. **Repos:** student org repos survive unless deliberately deleted. Consider transferring valuable repos back to the student's personal account before removing them from the org (they lose access on removal). Or leave repos public + archive them.
+1. **CS VPN:** if access was granted specifically for this course (rather than an entitlement the student already held as a CS major), tell CS IT to revoke it — same channel used at term start.
+2. **Coolify:** delete the team via UI → Team → Danger Zone (or directly in Postgres — a `provision-teams.sh --cleanup` mode is on the roadmap as Phase 21).
+3. **GitHub org:** remove the user from org → **People** → **Remove from org** (via UI or `gh api DELETE /orgs/byu-ml-capstone/members/<username>`).
+4. **GitHub Teams:** deleting the org member auto-removes them from all Teams. Team itself can be deleted via `gh api DELETE /orgs/byu-ml-capstone/teams/<slug>` if unused.
+5. **Repos:** student org repos survive unless deliberately deleted. Consider transferring valuable repos back to the student's personal account before removing them from the org (they lose access on removal). Or leave repos public + archive them.
 
 ---
 

@@ -8,7 +8,9 @@ Historical + active tickets we've sent (or plan to send) to BYU CS IT. Kept for 
 
 ## Active
 
-_None as of 2026-08-12._
+| File | What it asks for | Status |
+|---|---|---|
+| [`2026-09-15-cs-vpn-access-for-class-roster.md`](2026-09-15-cs-vpn-access-for-class-roster.md) | CS VPN (`cs-vpn.byu.edu`) access for the enrolled class roster, plus confirmation of the process so it can be documented | 📝 Draft — not yet sent |
 
 ## Upstream project issues
 

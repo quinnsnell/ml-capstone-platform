@@ -33,6 +33,12 @@ Should return a JSON list including `classroom-chat` and `classroom-autocomplete
 - Try `nslookup ml-capstone.cs.byu.edu` — expect an internal IP (e.g., `10.55.x.x`)
 - If still broken, LiteLLM may be down — see admin section below
 
+### GlobalProtect says "Connected" but nothing on the cluster resolves
+
+You're on the **campus** VPN, not the **CS** VPN. `vpn.byu.edu` and `cs-vpn.byu.edu` are different gateways; only the latter reaches this cluster. Check the portal your GlobalProtect client is actually connected to and switch it to `cs-vpn.byu.edu`.
+
+If `cs-vpn.byu.edu` isn't in the portal list, or login is rejected there, the student hasn't been granted CS VPN access — that's an entitlement separate from their NetID. Collect the NetID and submit it through whatever CS IT roster process is in effect (see [`onboarding.md`](onboarding.md) → *Term-start: request CS VPN access for the roster*). Students should route this through you, not BYU IT.
+
 ### opencode (or any agentic client) fails with "auto tool choice requires --enable-auto-tool-choice"
 
 Full error, as surfaced through LiteLLM:

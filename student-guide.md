@@ -10,6 +10,7 @@ You can use either capability or both. This guide walks you through setting up e
 ## Contents
 
 - [Before you start](#before-you-start)
+  - [Platform notes — read this if you're on Windows](#platform-notes--read-this-if-youre-on-windows)
 - **Part A — AI coding in your editor**
   - [Option 1: VS Code + Continue (recommended)](#option-1-vs-code--continue-recommended)
   - [Option 2: Continue chat + GitHub Copilot autocomplete](#option-2-continue-chat--github-copilot-autocomplete)
@@ -44,16 +45,55 @@ You can use either capability or both. This guide walks you through setting up e
 
 ## Before you start
 
-**Install GlobalProtect and connect to the CS VPN** — the cluster is on the CS network. Only the GitHub webhook + Coolify deploy-API paths are reachable from the public internet (so GitHub Actions can trigger deploys); everything else, including the LLM endpoint and your deployed apps, requires VPN.
+**Connect to the CS VPN — the campus VPN is not the same thing.** The cluster lives on the CS network. Only the GitHub webhook + Coolify deploy-API paths are reachable from the public internet (so GitHub Actions can trigger deploys); everything else, including the LLM endpoint and your deployed apps, requires the **CS** VPN.
 
-- VPN gateway: `cs-vpn.byu.edu`
-- Client: GlobalProtect (BYU IT has installers and instructions at vpn.byu.edu) 
+BYU runs two different gateways. They use the same client and they are **not** interchangeable:
+
+| | Gateway | Gets you |
+|---|---|---|
+| BYU campus VPN | `vpn.byu.edu` | General campus resources — **not this cluster** |
+| **CS VPN** | **`cs-vpn.byu.edu`** | The CS network: the LLM endpoint, Coolify, your deployed apps |
+
+1. Install **GlobalProtect** — BYU IT has installers and instructions at [vpn.byu.edu](https://vpn.byu.edu).
+2. In the client, set the **Portal** to `cs-vpn.byu.edu` (not `vpn.byu.edu`), then connect.
+3. Verify you're on the right one:
+
+   ```bash
+   nslookup ml-capstone.cs.byu.edu           # expect an internal 10.x.x.x address
+   curl -sS http://ml-capstone.cs.byu.edu:4000/v1/models
+   ```
+
+   The `curl` should return JSON listing `classroom-chat` and `classroom-autocomplete`. If `nslookup` returns NXDOMAIN or the `curl` hangs while GlobalProtect says "Connected," you're almost certainly connected to the campus gateway rather than the CS one.
+
+> **If `cs-vpn.byu.edu` rejects your login, or the portal doesn't appear in GlobalProtect at all, you don't have CS VPN access yet.** It's granted separately from your NetID and from your enrollment in this class. **Email your instructor your NetID** — don't file a ticket with BYU IT, since they run the campus VPN, not the CS one. Do this on day one; it is not instant.
 
 Also make sure you have:
 
 - A **GitHub account** — the email you use for GitHub must match the one your instructor has on the class roster. That's how Coolify's login and the org invite find you.
-- **Docker installed locally** (for testing your app before pushing)
+- **Docker installed locally** (for testing your app before pushing) — Docker Desktop on macOS and Windows, Docker Engine or Docker Desktop on Linux
 - **VS Code** or another editor of your choice
+
+### Platform notes — read this if you're on Windows
+
+This guide's terminal commands are written for **bash** (macOS Terminal, any Linux shell). They aren't PowerShell. Rather than translating every command, do what most professional Windows developers do:
+
+1. **[Install WSL](https://learn.microsoft.com/windows/wsl/install)** (`wsl --install` in an admin PowerShell, then reboot). You get a real Ubuntu shell where every command in this guide runs verbatim.
+2. **Point Docker Desktop at WSL 2** — Settings → General → *Use the WSL 2 based engine*, and Settings → Resources → WSL Integration → enable your distro. Without this, `docker compose` inside WSL can't see the daemon.
+3. **Keep your repos in the WSL filesystem** (`~/capstone/...`), not on `/mnt/c/...`. Builds and file watching are dramatically slower across the Windows drive mount.
+
+Git Bash will run the simpler commands, but the shell scripts (`./smoke-test.sh`, `./integration-test.sh`) and the Docker workflow expect WSL. WSL is the supported path.
+
+**VS Code is the exception.** Install it on **Windows**, not inside WSL — then use the **WSL** extension (`Ctrl+Shift+P` → *WSL: Connect to WSL*) so the editor runs on Windows while its terminal and your code live in Linux. Two consequences worth remembering:
+
+| Thing | macOS | Windows |
+|---|---|---|
+| Keyboard shortcuts in this guide | `Cmd+...` | `Ctrl+...` |
+| VS Code extension configs (`~/.continue/config.yaml`) | `~/.continue/` | `%USERPROFILE%\.continue\` — i.e. `C:\Users\you\.continue\`, **not** your WSL home |
+| Everything else (`docker`, `curl`, `./*.sh`, `git`) | Terminal | WSL terminal |
+
+That second row is the one that bites people: extensions run on the Windows side and read their config from your Windows user folder, even when the code you're editing is in WSL.
+
+Linux users: everything works as written, no notes.
 
 Your instructor has already:
 
@@ -112,7 +152,7 @@ Copilot and Continue both draw inline ghost-text and fight over the same slot. I
 }
 ```
 
-Then `Cmd+Shift+P` → **Developer: Reload Window**.
+Then `Cmd+Shift+P` / `Ctrl+Shift+P` → **Developer: Reload Window**.
 
 (If you'd rather **keep Copilot's autocomplete** and only use Continue for chat, skip this step and use Option 2 instead.)
 
@@ -120,9 +160,18 @@ Then `Cmd+Shift+P` → **Developer: Reload Window**.
 
 Continue's UI provider dropdown doesn't expose "OpenAI Compatible", so we configure the classroom endpoint via YAML:
 
+**macOS / Linux:**
+
 ```bash
 mkdir -p ~/.continue
 code ~/.continue/config.yaml
+```
+
+**Windows** — Continue runs on the Windows side of VS Code, so this file belongs in your **Windows** user folder, not your WSL home. From PowerShell:
+
+```powershell
+mkdir -Force $env:USERPROFILE\.continue
+code $env:USERPROFILE\.continue\config.yaml
 ```
 
 Paste this as the whole file:
@@ -157,7 +206,7 @@ Key details:
 - `useLegacyCompletionsEndpoint: true` on autocomplete routes to `/v1/completions` (FIM-capable) instead of `/v1/chat/completions`. Required for the FIM tokens to work.
 - `name: Classroom` is the **assistant** name (see step 5).
 
-Save. `Cmd+Shift+P` → **Developer: Reload Window**.
+Save. `Cmd+Shift+P` / `Ctrl+Shift+P` → **Developer: Reload Window**.
 
 ### 4. Sign out of Continue Hub if you were auto-signed-in
 
@@ -167,7 +216,7 @@ Fresh Continue installs sign you into Continue Hub and pick a hosted assistant (
 
 1. Click the Continue extension icon (activity bar, far left).
 2. Top of the Continue panel — **Current assistant** should say **Classroom** (click the assistant chip to switch if not).
-3. Open the chat panel: `Cmd+L`. The model chip near the input should offer **Classroom Chat** — pick it.
+3. Open the chat panel: `Cmd+L` / `Ctrl+L`. The model chip near the input should offer **Classroom Chat** — pick it.
 4. Type `"what is 2+2?"`. You should get a response in a few seconds.
 5. Open a Python file, place your cursor mid-function, wait ~1s. Ghost-text should appear from **Classroom Autocomplete**.
 
@@ -198,13 +247,31 @@ Trade-off: Copilot's autocomplete needs internet access + a Copilot subscription
 
 [opencode](https://opencode.ai) is a terminal-based agentic assistant, similar to Claude Code but pointed at any OpenAI-compatible endpoint. Chat-only, no editor autocomplete.
 
-### Install and configure
+### Install
+
+**macOS:**
+
+```bash
+brew install opencode
+```
+
+**Windows:** use WSL. opencode runs natively on Windows, but its own docs recommend WSL for better filesystem performance and full terminal support. [Install WSL](https://learn.microsoft.com/windows/wsl/install), then from a **WSL terminal** (not PowerShell):
 
 ```bash
 curl -fsSL https://opencode.ai/install | bash
 ```
 
-Create `~/.config/opencode/opencode.json`:
+Keep your project inside the WSL filesystem (`~/capstone`, not `/mnt/c/Users/...`) — working across the Windows drive mount is noticeably slower. Run `opencode` from that same WSL terminal.
+
+**Linux, or any platform without a package manager:**
+
+```bash
+curl -fsSL https://opencode.ai/install | bash
+```
+
+### Configure
+
+Create `~/.config/opencode/opencode.json` (on Windows that's your **WSL** home directory, not `C:\Users\you\`):
 
 ```json
 {
@@ -240,7 +307,7 @@ If you're already a Copilot user and want to route Copilot Chat to the classroom
 
 ### Copilot Chat
 
-`Cmd+Shift+P` → **Chat: Manage Language Models** → pick **OpenAI Compatible** → fill in:
+`Cmd+Shift+P` / `Ctrl+Shift+P` → **Chat: Manage Language Models** → pick **OpenAI Compatible** → fill in:
 
 - Base URL: `http://ml-capstone.cs.byu.edu:4000/v1`
 - API Key: `sk-noauth`
@@ -262,7 +329,7 @@ export COPILOT_OFFLINE=true
 copilot
 ```
 
-Put the exports in `~/.bashrc` (or `~/.zshrc`) to persist.
+Put the exports in `~/.bashrc` (or `~/.zshrc`) to persist. In WSL that's your WSL `~/.bashrc` — the Copilot CLI runs wherever you launched it, so keep it on one side and stay there.
 
 ---
 
@@ -1486,7 +1553,7 @@ Fast feedback loop: green here means you're safe to push. Roughly 30 seconds aft
 
 Nice for a quick sanity check right after a Coolify deploy: "did the endpoints actually come up on the live URL?" Same script, so what passes locally should pass remotely; if it doesn't, you've found a bug that only appears in the Coolify environment.
 
-**Limits:** doesn't test against real infrastructure — the `/health` and `/analyze` endpoints hit the classroom LiteLLM, but everything is running locally on your Mac. Bugs that only appear in the Coolify environment (env vars, GPU allocation, networking) can slip through — running the same script with a remote URL after the deploy catches most of those.
+**Limits:** doesn't test against real infrastructure — the `/health` and `/analyze` endpoints hit the classroom LiteLLM, but everything is running locally on your laptop. Bugs that only appear in the Coolify environment (env vars, GPU allocation, networking) can slip through — running the same script with a remote URL after the deploy catches most of those.
 
 ### Tier 2 — Deploy gate (Coolify's `/health` check)
 
@@ -1565,7 +1632,7 @@ Until then, running `integration-test.sh` before opening the PR from staging →
 | Syntax error, import bug | ✅ | (would never deploy) | (would never deploy) |
 | Broken endpoint URL | ✅ | ✅ | ✅ |
 | App can't reach LLM in staging | ❌ (local works) | ✅ | ✅ |
-| GPU allocation missing | ❌ (fallback to CPU on Mac) | ✅ | ✅ |
+| GPU allocation missing | ❌ (falls back to CPU locally) | ✅ | ✅ |
 | Response shape wrong under specific input | ❌ (happy path only) | ❌ (single scripted check) | ✅ |
 | Model gives poor accuracy on real user data | ❌ | ❌ | ✅ |
 | Regression from a code change altering behavior | ❌ | ❌ | ✅ |
@@ -2335,12 +2402,21 @@ One `terraform apply` recreates Part B's Setup Steps 4–9 in a single command:
 You'll need:
 
 1. **Terraform** installed on your laptop:
+
    ```bash
    # macOS
    brew tap hashicorp/tap
    brew install hashicorp/tap/terraform
    ```
-   Verify with `terraform version` — expect 1.5 or higher. (OpenTofu — `brew install opentofu` — is a drop-in replacement if you prefer the open-source fork.)
+
+   ```powershell
+   # Windows — from PowerShell, installs on the Windows side
+   winget install -e --id Hashicorp.Terraform
+   ```
+
+   On **Linux or WSL**, use HashiCorp's apt/yum repo — see [developer.hashicorp.com/terraform/install](https://developer.hashicorp.com/terraform/install). If you've been working in WSL all semester, install it there rather than on Windows, so `terraform` and your repo share a filesystem.
+
+   Verify with `terraform version` — expect 1.5 or higher. (OpenTofu is a drop-in replacement if you prefer the open-source fork: `brew install opentofu`, `winget install OpenTofu.Tofu`, or the [Linux packages](https://opentofu.org/docs/intro/install/).)
 
 2. **A fresh templated repo** just for the bonus, so `terraform destroy` won't touch your real project. Follow Part B Setup Step 1 to template a new repo from `byu-ml-capstone/hello-world-app`, name it something like `<yourname>-terraform-lab`, and `gh repo clone` it locally.
 
