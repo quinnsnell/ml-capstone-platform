@@ -217,7 +217,29 @@ if ! command -v nvidia-smi >/dev/null; then
     echo "ERROR: nvidia-smi not found. Install the NVIDIA driver first." >&2
     exit 1
 fi
-GPU_COUNT=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
+# nvidia-smi existing is not the same as nvidia-smi working. Capture failures
+# explicitly: under `set -euo pipefail` a failing nvidia-smi inside a command
+# substitution aborts the script instantly, and the ERR trap is not installed
+# until step 1 - so without this the installer exits silently with no output at
+# all, which is precisely the wrong behaviour when the driver is broken.
+if ! GPU_LIST=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>&1); then
+    echo "ERROR: nvidia-smi is installed but failed to run:" >&2
+    echo "" >&2
+    printf '  %s\n' "$GPU_LIST" >&2
+    echo "" >&2
+    echo "'Driver/library version mismatch' means the NVIDIA packages on disk were" >&2
+    echo "upgraded while an older kernel module is still loaded. A reboot loads the" >&2
+    echo "new module - but FIRST confirm DKMS actually built it for the kernel you" >&2
+    echo "would boot into:" >&2
+    echo "" >&2
+    echo "  dkms status" >&2
+    echo "  uname -r" >&2
+    echo "" >&2
+    echo "If the module is missing for that kernel, the host comes back with no GPU" >&2
+    echo "at all and both vLLM engines fail to start. Fix DKMS before rebooting." >&2
+    exit 1
+fi
+GPU_COUNT=$(printf '%s\n' "$GPU_LIST" | grep -c . || true)
 if [[ $GPU_COUNT -lt 2 ]]; then
     echo "ERROR: need at least 2 GPUs; found $GPU_COUNT." >&2
     exit 1

@@ -168,6 +168,27 @@ Front-end host (rigel) is down or LiteLLM is stopped. Recovery order:
 2. If not: `sudo docker start litellm`; check `sudo docker logs litellm`
 3. If persistent: fall back to direct-to-vLLM on castor/pollux (see student guide's fallback section). Notify students to change their `apiBase`.
 
+### `install-qwen-cluster.sh` prints nothing at all and changes nothing
+
+The command returns immediately with no banner, no error, no steps — and the engines keep running the old config. Check the driver:
+
+```bash
+nvidia-smi
+```
+
+If it reports `Failed to initialize NVML: Driver/library version mismatch`, that's the cause. Preflight runs `nvidia-smi` inside a command substitution; under `set -euo pipefail` its failure aborted the script before the ERR trap was installed, so nothing was printed. Current versions of the script detect this and print an explanation — `git pull` if yours exits silently.
+
+**The mismatch itself** means the NVIDIA packages on disk were upgraded while an older kernel module is still loaded. Rebooting loads the new module and is the normal fix — but confirm DKMS built it for the kernel you'd boot into *first*:
+
+```bash
+dkms status          # module versions vs kernels
+uname -r             # what's running now
+```
+
+If DKMS has no module for the kernel that would boot, the host comes back with no GPU at all and both vLLM engines fail to start. Recover by selecting the previous kernel in GRUB's "Advanced options" at boot, then fix DKMS before trying again.
+
+Because LiteLLM pools both GPU hosts, one host can be down for this without taking the class offline — as long as the other one is healthy. Never reboot both at once.
+
 ### `install-qwen-cluster.sh` aborts in step 1/6 with dpkg errors
 
 Symptom: the run dies at "Installing OS packages" with `E: Sub-process /usr/bin/dpkg returned an error code (1)`, listing kernel packages (`linux-headers-*`, `linux-image-*`) as "not fully installed or removed" — even though every package the script actually wants reports "already the newest version".
