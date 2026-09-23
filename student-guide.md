@@ -19,7 +19,7 @@ You can use either capability or both. This guide walks you through setting up e
 - **Part B — Deploying your app via CI/CD**
   - [The overall flow](#the-overall-flow) — architecture diagram + who does what
   - [Why staging + prod?](#why-staging--prod)
-  - [Setup: Create your repo, then sign in and create your Coolify Applications](#setup-create-your-repo-then-sign-in-and-create-your-coolify-applications) — the 11-step onboarding lab (Coolify + first deploy + first schema migration)
+  - [Setup: Create your repo, then sign in and create your Coolify Applications](#setup-create-your-repo-then-sign-in-and-create-your-coolify-applications) — the onboarding lab; Applications via **Terraform (Path A)** or the **Coolify UI (Path B)**, then first deploy + first schema migration
   - [Section 1: Build your first deployable app](#section-1-build-your-first-deployable-app) — grow hello-world into a sentiment classifier
   - [Section 2: Test it locally](#section-2-test-it-locally)
   - [Section 3: Add tests](#section-3-add-tests)
@@ -607,6 +607,122 @@ The team switcher lives at the top of the main panel — it looks like a breadcr
 **Why servers matter.** Every Application you create in Coolify has to be *deployed somewhere*. In cloud-PaaS terms, a "server" is a compute target — the physical or virtual machine that runs your containers. Your team already has one attached, called **`ml-capstone`**. Behind the scenes it's a shared physical box (`rigel.cs.byu.edu`, 4× A6000 GPUs) that hosts every team's containers — but the abstract name `ml-capstone` lets your instructor move workloads to different hardware later without changing anything you see.
 
 Left sidebar → **Servers**. You should see one server called **`ml-capstone`** with a green "reachable" indicator. That's all you need to check — you don't need to click into the server; the details page is admin-oriented. If the server is missing, tell the instructor before continuing.
+
+### Choose how to create your Coolify Applications
+
+You need a Coolify Project, two Environments, two Applications, and three GitHub Actions secrets. There are two ways to get them, and they end in exactly the same place.
+
+| | **Path A — Terraform** | **Path B — Coolify UI** |
+|---|---|---|
+| Time | ~10 minutes | ~30 minutes |
+| You need | Terraform installed | nothing extra |
+| How it feels | fill in four values, run one command | six steps of clicking |
+| What you learn | infrastructure as code | what Coolify actually builds |
+| Mistakes | the plan shows you everything before it happens | a few easy ones to make (wrong port, auto-deploy left on) |
+
+**Neither is the "real" way** — both are how professionals work, and you'll meet both. If you want to see the moving parts before automating them, take Path B. If you'd rather automate first and inspect afterwards, take Path A; the Coolify UI is still there to look at once it's built.
+
+Whichever you pick, **you set your two domains by hand at the end** — Terraform can't do that part, and Path B does it inline.
+
+- **Path A →** continue immediately below, then skip to **Step 10**.
+- **Path B →** skip past Path A to **Step 4** and work through Steps 4–9.
+
+---
+
+## Path A — Terraform
+
+One `terraform apply` creates everything Steps 4–9 create by hand: the Project, both Environments, both Applications (with auto-deploy already off), and all three GitHub Actions secrets.
+
+### A1. Install Terraform
+
+```bash
+# macOS
+brew install hashicorp/tap/terraform
+```
+
+```powershell
+# Windows
+winget install -e --id Hashicorp.Terraform
+```
+
+On **Linux or WSL**, use HashiCorp's repo — see [developer.hashicorp.com/terraform/install](https://developer.hashicorp.com/terraform/install). Verify with `terraform version` (expect 1.5 or higher).
+
+### A2. Create a Coolify API token
+
+**Switch to your own team in the team switcher first.** The token is scoped to whichever team is active when you create it, and that decides where your Applications get created.
+
+Then: Coolify wordmark (top-left) → **Keys & Tokens → API Tokens → + New Token**. Description `terraform`. Permissions: tick **`write`** and **`deploy`**. Expires: 1 year. Create, and **copy it immediately** — Coolify shows it once.
+
+> You will not see a `root` permission option. That exists only in the instructor's Root Team, and this doesn't need it.
+
+### A3. Look up your server UUID
+
+Coolify gives every team its own server record. They're all named `ml-capstone` and all point at the same machine, but each has a different UUID — so there's no value that works for everyone, and you have to look yours up:
+
+```bash
+curl -H "Authorization: Bearer <your-coolify-token>" \
+  https://ml-capstone-admin.cs.byu.edu/api/v1/servers
+```
+
+Exactly one server comes back. Copy its `uuid`.
+
+### A4. Fill in your variables
+
+```bash
+cd terraform
+cp terraform.tfvars.example terraform.tfvars
+```
+
+Open `terraform.tfvars` and set four values:
+
+| Variable | Value |
+|---|---|
+| `coolify_token` | the token from A2 |
+| `github_token` | run `gh auth token`, or create a classic PAT with `repo` scope |
+| `repo_name` | just your repo name — `alice-hello`, **not** `byu-ml-capstone/alice-hello` |
+| `coolify_server_uuid` | the UUID from A3 |
+
+`terraform.tfvars` holds two live credentials and is already in `.gitignore`. Never commit it.
+
+### A5. Plan, then apply
+
+```bash
+terraform init
+terraform plan      # read this before continuing
+terraform apply
+```
+
+`plan` should end with **`Plan: 7 to add, 0 to change, 0 to destroy`**. Read what it intends to create — that habit is most of the value of using Terraform at all. Then `apply` and type `yes`.
+
+The outputs give you both URLs and the Application UUIDs.
+
+**Check it worked:**
+
+- GitHub → your repo → **Settings → Secrets and variables → Actions**: three secrets (`COOLIFY_API_TOKEN`, `COOLIFY_DEPLOY_WEBHOOK_STAGING`, `COOLIFY_DEPLOY_WEBHOOK_PROD`).
+- Coolify → your team → a Project named after your repo, containing `production` and `staging` Environments, each with an Application.
+
+### A6. Set your two domains (the part Terraform can't do)
+
+Coolify's API won't let Terraform set per-service domains on a Docker Compose app, so this stays manual. For **each** of your two Applications, in the Coolify UI:
+
+**Access → the gear icon on "1 configured domain"** (or the **Domains** tab) → under service **`hello`** set the domain, then **Save**:
+
+| Application | Domain |
+|---|---|
+| staging | `http://<your-repo>-staging.ml-capstone.cs.byu.edu` |
+| production | `http://<your-repo>.ml-capstone.cs.byu.edu` |
+
+Delete the auto-generated `<longhash>.sslip.io` placeholder and the `www.` variant if Coolify added one. Don't click "Generate Domain".
+
+> **Do this before your first deploy.** Traefik routes using labels baked into a container when it starts, so if you deploy first and set the domain afterwards, your URL returns `404 page not found` until you hit **Redeploy**.
+
+**Path A is done — skip to [Step 10](#10-prove-the-pipeline-make-a-real-code-change-and-see-tests-catch-a-bug).**
+
+---
+
+## Path B — the Coolify UI
+
+Steps 4–9 below are Path B. If you took Path A, skip to Step 10.
 
 ### 4. Create a Project + Environments
 
@@ -2426,7 +2542,12 @@ These bypass LiteLLM, so you must change the *model name* in your client from `c
 
 # Bonus: Infrastructure as Code
 
-Optional. Do this **after** you've finished Part B end-to-end at least once — the point is to see the same wiring you did by hand, this time expressed as code. Everything you need ships in the `terraform/` directory of any repo templated from `hello-world-app`.
+Optional. Do this **after** you've finished Part B end-to-end at least once. Everything you need ships in the `terraform/` directory of any repo templated from `hello-world-app`.
+
+**What this adds depends on which setup path you took:**
+
+- **You took Path B (Coolify UI).** This is the payoff: the same wiring you clicked through, expressed as code. Run it against a throwaway repo and watch one command reproduce Steps 4–9.
+- **You took Path A (Terraform).** You've already run `apply`. The value here is everything around it — reading `main.tf` to see what each resource maps to in the UI, running `terraform destroy` and re-applying to watch state get rebuilt, and understanding why the domain step resists automation. Use a throwaway repo so you aren't destroying the project you're actually working in.
 
 ## What is Infrastructure as Code?
 
