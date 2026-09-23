@@ -316,16 +316,16 @@ First time only — create `.env` in the repo root (gitignored) with `CANVAS_HOS
 # --- in class -------------------------------------------------------------
 ./scripts/canvas-roster.py status                  # who has answered
 ./scripts/term-start.sh --term 2026-fall           # preview: changes nothing
-./scripts/term-start.sh --term 2026-fall --apply   # roster + invites, stops at the gate
+./scripts/term-start.sh --term 2026-fall --observer you@cs.byu.edu --apply
 
 # --- students accept the GitHub invitation --------------------------------
 ./scripts/term-start.sh --only gate                # who is still outstanding
 
 # --- once they have accepted ----------------------------------------------
-./scripts/term-start.sh --term 2026-fall --from teams --apply
+./scripts/term-start.sh --term 2026-fall --observer you@cs.byu.edu --from teams --apply
 
 # --- as stragglers appear, repeat over the WHOLE class --------------------
-./scripts/term-start.sh --term 2026-fall --apply
+./scripts/term-start.sh --term 2026-fall --observer you@cs.byu.edu --apply
 ```
 
 Everything above is safe to re-run. Use the same `--term` each time.
@@ -352,8 +352,11 @@ Credentials come from a gitignored `.env` (`CANVAS_HOST`, `CANVAS_COURSE`, `CANV
 ./scripts/term-start.sh                      # preview everything, change nothing
 ./scripts/term-start.sh --apply              # execute
 ./scripts/term-start.sh --from teams --apply # resume after the acceptance gate
+./scripts/term-start.sh --only gate          # who hasn't accepted their invite
 ./scripts/term-start.sh --only coolify --apply
 ```
+
+**Pass `--observer <your-email>` on any run that provisions Coolify.** It makes you an admin of every team, so all of them appear in your own Coolify team switcher and you can look at a student's setup directly. Without it, helping someone means adding yourself to their team in the database by hand, walking the UI, and removing the row again. It defaults to `$OPERATOR_EMAIL`, and phase 4 warns when neither is set — for a class of 30 that should be a deliberate choice, not a discovery.
 
 **Preview is the default**, matching every underlying script: without `--apply` each phase runs its own dry run. Every phase is independently idempotent, so re-running after fixing a problem is always safe — that is what makes the gate cheap to respect.
 
