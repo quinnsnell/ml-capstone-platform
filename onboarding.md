@@ -99,6 +99,8 @@ Rosters are gitignored (FERPA). Keep them on rigel; `scp` from your laptop as ne
 
 ## Term-start: run the three provisioning scripts
 
+> **Shortcut:** `./scripts/term-start.sh --term <term> --apply` runs all three in order, enforces the invitation-acceptance gate between steps 1 and 2, and drives the Coolify step on whichever host is actually running Coolify. See [`admin-guide.md`](admin-guide.md) §3. The sections below are the same work done by hand — useful when something needs unpicking, or when you want to run a single step.
+
 Everything reads the same **roster CSV** with columns `team_name,email,name,github_username`. See `roster-example.csv` for the shape. Each script is idempotent — safe to re-run whenever the roster grows.
 
 > **All three scripts default to preview mode.** Running without `--apply` shows what it *would* do (per-row plan + rollup) without making any changes. Always run the preview first, sanity-check the plan, then re-run with `--apply` to execute. This is safer than dry-run flags on some tools because the preview is the *actual* SQL / API calls the apply will make — not an approximation.
