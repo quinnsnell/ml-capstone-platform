@@ -15,7 +15,7 @@ Redundancy is layered:
 - **Engine-level failover.** If a vLLM engine crashes — or a whole GPU host goes offline — LiteLLM routes to the surviving engine transparently. Students see nothing worse than a slightly slower first response.
 - **Single client-facing endpoint.** Every student's editor points at `http://ml-capstone.cs.byu.edu:4000/v1` regardless of role. No Group A / Group B split anymore — load balancing is done server-side.
 
-The one failure mode that's now class-wide is a **front-end host outage**: if rigel.cs.byu.edu is down, every student loses proxy access. Recovery is a manual client-config edit pointing directly at a raw vLLM engine on castor or pollux — see §3 and the recovery section in the Student Guide.
+The one failure mode that's now class-wide is a **front-end host outage**: if rigel.cs.byu.edu is down, every student loses proxy access. Recovery is a manual client-config edit pointing directly at a raw vLLM engine on castor or pollux — see §4 and the recovery section in the Student Guide.
 
 ---
 
@@ -292,7 +292,66 @@ The `--keep-models` flag is worth knowing about: the chat model download alone i
 
 ---
 
-## 3. Architectural Advantages & Emergency Procedures
+## 3. Term-start provisioning
+
+Getting a class onto the platform is five steps in a fixed order, with one unavoidable human wait in the middle. `scripts/term-start.sh` runs the sequence and enforces the order; [`onboarding.md`](onboarding.md) is the longer-form checklist with per-script detail.
+
+```
+1. roster    canvas-roster.py build      Canvas + survey  ->  roster CSV
+2. invite    invite-to-org.sh            GitHub org invitations
+-  GATE      students must ACCEPT those invitations        (days, not minutes)
+3. teams     provision-gh-teams.sh       GitHub Teams + membership
+4. coolify   provision-teams.sh          Coolify teams/users/server  (on rigel)
+5. verify    verify-provisioning.sh      read-only check of all of it
+```
+
+### Where the roster comes from
+
+Canvas knows every student's name and email. It does **not** know their GitHub username, and every downstream script depends on that field. `scripts/canvas-roster.py` bridges the gap with a Canvas survey:
+
+```bash
+./scripts/canvas-roster.py create-quiz --draft   # review, then publish in Canvas
+./scripts/canvas-roster.py status                # chase list + reported VPN problems
+./scripts/canvas-roster.py build --term 2026-fall --verify-github
+```
+
+Credentials come from a gitignored `.env` (`CANVAS_HOST`, `CANVAS_COURSE`, `CANVAS_TOKEN`). The survey asks for the GitHub username, the email on the GitHub account (Coolify matches OAuth logins against it), and whether the CS VPN actually works — that last one surfaces the entitlement gap in week one instead of mid-lab.
+
+`build` normalises pasted profile URLs and `@handles`, verifies usernames resolve, keeps `team_name` unique, and lists anyone without a usable response as skipped rather than guessing. Re-running it is always safe.
+
+### Running the sequence
+
+```bash
+./scripts/term-start.sh                      # preview everything, change nothing
+./scripts/term-start.sh --apply              # execute
+./scripts/term-start.sh --from teams --apply # resume after the acceptance gate
+./scripts/term-start.sh --only coolify --apply
+```
+
+**Preview is the default**, matching every underlying script: without `--apply` each phase runs its own dry run. Every phase is independently idempotent, so re-running after fixing a problem is always safe — that is what makes the gate cheap to respect.
+
+### Why it is not one fire-and-forget run
+
+**Phase 3 cannot add a student to a GitHub Team until they have accepted the org invitation from phase 2.** That wait is measured in days. So the realistic shape of a term start is:
+
+1. Run phases 1–2, then tell students to accept the invite (syllabus deadline helps).
+2. Wait. `./scripts/term-start.sh --from teams` reports who is still outstanding without changing anything.
+3. Once everyone is in, `--from teams --apply` finishes the job.
+
+The gate **exits non-zero (code 2) rather than continuing**, so a half-accepted roster fails loudly instead of quietly provisioning a subset of the class and leaving you to discover the gap later. `--skip-gate` provisions everyone who *has* accepted; re-running afterwards fills in the rest.
+
+### The two things that need a different machine or a human
+
+- **Phase 4 runs on rigel.** `provision-teams.sh` writes directly to Coolify's Postgres and needs docker access to the `coolify-db` container. `term-start.sh` detects whether it is already on the Coolify host and otherwise drives it over ssh, copying the roster up first. It always runs `--check-schema` before applying — a Coolify auto-upgrade that renamed a column would otherwise produce silently broken INSERTs.
+- **Students provision their own Applications.** The instructor never creates Applications or Deploy Webhooks; that is Part B of [`student-guide.md`](student-guide.md).
+
+### FERPA
+
+Roster CSVs contain real student emails and GitHub usernames. `.gitignore` covers `roster-*.csv` (with `roster-example.csv` deliberately exempt so the format stays discoverable) and `.env`. Keep rosters on rigel and `scp` as needed; never commit one.
+
+---
+
+## 4. Architectural Advantages & Emergency Procedures
 
 - **Right-sized model per workload.** A small FIM model on GPU 1 gives sub-100 ms ghost-text suggestions; the big chat model on GPU 0 keeps its throughput for the requests that actually need it.
 - **No tensor-parallel overhead.** Each model owns its GPU, so there's no per-layer all-reduce between cards. Both engines run at TP=1.

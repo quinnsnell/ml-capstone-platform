@@ -59,6 +59,7 @@ ml-capstone-platform/
 │   ├── smoke-test-cluster.sh      End-to-end smoke test (run from your laptop over VPN)
 │   ├── pin-gpu-host.sh           Freeze/verify a GPU host's kernel + NVIDIA driver pin
 │   ├── canvas-roster.py          Canvas roster + GitHub-username survey -> roster CSV
+│   ├── term-start.sh             Ordered term-start provisioning (roster -> GitHub -> Coolify)
 │   ├── provision-teams.sh         Bulk-create Coolify teams+users+servers from roster CSV (runs on rigel)
 │   ├── verify-provisioning.sh     Post-provision check: GitHub + Coolify state per roster row (runs on rigel)
 │   ├── invite-to-org.sh           Invite roster users to the byu-ml-capstone GitHub org (runs on laptop)
