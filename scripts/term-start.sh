@@ -335,8 +335,18 @@ if should_run verify; then
        GitHub membership as well as Coolify's database). Authenticate gh there
        with 'gh auth login', or run verify-provisioning.sh by hand where both
        gh and docker are available."
-            ssh "$COOLIFY_HOST" "cd ~/ml-capstone-platform && ./scripts/verify-provisioning.sh --roster '$(basename "$ROSTER")'" \
-                || fail "verification found problems on $COOLIFY_HOST"
+            # verify-provisioning.sh reads the roster on the remote side, and
+            # phase 4 may not have run in this invocation (--only verify), so
+            # never assume the file is already there. It is read-only, so the
+            # copy is removed afterwards either way.
+            VERIFY_ROSTER=".verify-$(basename "$ROSTER")"
+            scp -q "$ROSTER" "$COOLIFY_HOST:~/ml-capstone-platform/$VERIFY_ROSTER" \
+                || fail "could not copy the roster to $COOLIFY_HOST for verification"
+            verify_rc=0
+            ssh "$COOLIFY_HOST" "cd ~/ml-capstone-platform && ./scripts/verify-provisioning.sh --roster '$VERIFY_ROSTER'" \
+                || verify_rc=$?
+            ssh "$COOLIFY_HOST" "rm -f ~/ml-capstone-platform/$VERIFY_ROSTER"
+            (( verify_rc == 0 )) || fail "verification found problems on $COOLIFY_HOST"
         fi
         good "verification passed"
     else
