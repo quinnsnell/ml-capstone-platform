@@ -36,7 +36,8 @@
 #   --term NAME        Term label for the roster filename (default: current)
 #   --roster PATH      Use this roster instead of building//picking one
 #   --org NAME         GitHub org (default: byu-ml-capstone)
-#   --rigel-host HOST  ssh target for the Coolify phase (default: rigel)
+#   --coolify-host HOST  ssh target for the Coolify phase when this machine is not
+#                      the Coolify host (default: rigel, or $COOLIFY_HOST)
 #   --only PHASE       Run a single phase: roster|invite|teams|coolify|verify
 #                      Also accepts: gate  (just report who has/hasn't accepted)
 #   --from PHASE       Start at PHASE and run everything after it
@@ -52,7 +53,8 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 TERM_NAME=current
 ROSTER=""
 ORG=byu-ml-capstone
-RIGEL_HOST=rigel
+COOLIFY_HOST="${COOLIFY_HOST:-rigel}"
+COOLIFY_DB_CONTAINER="${COOLIFY_DB_CONTAINER:-coolify-db}"
 ONLY=""
 FROM=""
 SKIP_GATE=0
@@ -65,7 +67,8 @@ while [[ $# -gt 0 ]]; do
         --term)        TERM_NAME="$2"; shift 2 ;;
         --roster)      ROSTER="$2";    shift 2 ;;
         --org)         ORG="$2";       shift 2 ;;
-        --rigel-host)  RIGEL_HOST="$2";shift 2 ;;
+        --coolify-host) COOLIFY_HOST="$2"; shift 2 ;;
+        --rigel-host)   COOLIFY_HOST="$2"; shift 2 ;;   # legacy alias
         --only)        ONLY="$2";      shift 2 ;;
         --from)        FROM="$2";      shift 2 ;;
         --skip-gate)   SKIP_GATE=1;    shift ;;
@@ -114,6 +117,31 @@ validate_phase_name "$FROM" "--from"
 # Underlying scripts all default to preview and take --apply to execute.
 APPLY_FLAG=()
 (( APPLY )) && APPLY_FLAG=(--apply)
+
+# ---- "Am I the Coolify host?" --------------------------------------------
+# Probe for the capability that actually matters -- a usable local Docker with
+# Coolify's Postgres container running -- instead of matching a hostname. The
+# Coolify host is rigel today and may not be forever; provision-teams.sh needs
+# docker access to coolify-db regardless of what the machine is called.
+#
+# Echoes: yes | no | denied
+coolify_probe() {
+    command -v docker >/dev/null 2>&1 || { echo no; return; }
+    local out
+    if ! out=$(docker ps --format '{{.Names}}' 2>&1); then
+        if grep -qi 'permission denied' <<<"$out"; then echo denied; else echo no; fi
+        return
+    fi
+    if grep -qx "$COOLIFY_DB_CONTAINER" <<<"$out"; then echo yes; else echo no; fi
+}
+
+# Same probe over ssh, so we never run phase 4 against a host that merely
+# answers to the configured name.
+coolify_probe_remote() {
+    ssh -o BatchMode=yes "$1" \
+        "command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx '$COOLIFY_DB_CONTAINER'" \
+        >/dev/null 2>&1
+}
 
 pick_roster() {
     [[ -n "$ROSTER" ]] && { echo "$ROSTER"; return; }
@@ -229,29 +257,49 @@ fi
 # ---- Phase 4: Coolify (runs on rigel) -----------------------------------
 if should_run coolify; then
     banner "PHASE 4/5 — Coolify teams, users, server, destination"
-    if [[ -f /etc/qwen-cluster/pinned-state.conf ]] || [[ "$(hostname -s)" == "$RIGEL_HOST" ]]; then
-        LOCAL_RIGEL=1
-    else
-        LOCAL_RIGEL=0
-    fi
+    # provision-teams.sh writes directly to Coolify's Postgres via docker exec,
+    # so this phase MUST execute on the machine running coolify-db. Decide by
+    # probing for that container, never by hostname.
+    case "$(coolify_probe)" in
+        yes)
+            good "this machine is running $COOLIFY_DB_CONTAINER — provisioning locally"
+            "$SCRIPT_DIR/provision-teams.sh" --check-schema \
+                || fail "Coolify schema check failed — do NOT proceed; see onboarding.md step 3a"
+            "$SCRIPT_DIR/provision-teams.sh" --roster "$ROSTER" "${APPLY_FLAG[@]}" \
+                || fail "provision-teams.sh failed"
+            ;;
+        denied)
+            fail "Docker is installed here but not usable by $(id -un).
+       This looks like the Coolify host, but the probe cannot see its containers.
+       Fix with:  sudo usermod -aG docker $(id -un)   then log out and back in."
+            ;;
+        no)
+            info "$COOLIFY_DB_CONTAINER is not running here, so this is not the Coolify host."
+            [[ -n "$COOLIFY_HOST" ]] \
+                || fail "No --coolify-host given and this machine is not the Coolify host.
+       Pass --coolify-host <host>, or run this phase on the machine hosting Coolify."
+            info "Verifying $COOLIFY_HOST actually runs Coolify before touching anything..."
+            ssh -o BatchMode=yes "$COOLIFY_HOST" true 2>/dev/null \
+                || fail "cannot ssh to '$COOLIFY_HOST' non-interactively. Fix ssh keys, or run
+       this phase directly on the Coolify host."
+            coolify_probe_remote "$COOLIFY_HOST" \
+                || fail "'$COOLIFY_HOST' is reachable but is NOT running $COOLIFY_DB_CONTAINER.
+       Refusing to provision against it. If Coolify has moved, pass the new host
+       with --coolify-host (or set COOLIFY_HOST in the environment)."
+            good "$COOLIFY_HOST confirmed running $COOLIFY_DB_CONTAINER"
 
-    if (( LOCAL_RIGEL )); then
-        info "Running locally (this host looks like the Coolify host)."
-        "$SCRIPT_DIR/provision-teams.sh" --check-schema || fail "Coolify schema check failed — do NOT proceed"
-        "$SCRIPT_DIR/provision-teams.sh" --roster "$ROSTER" "${APPLY_FLAG[@]}" \
-            || fail "provision-teams.sh failed"
-    else
-        info "provision-teams.sh needs docker access to coolify-db, so it runs on $RIGEL_HOST."
-        ssh -o BatchMode=yes "$RIGEL_HOST" true 2>/dev/null \
-            || fail "cannot ssh to $RIGEL_HOST non-interactively. Run phase 4 there by hand, or fix ssh keys."
-        info "Copying the roster to $RIGEL_HOST (contains student PII — it is gitignored on both ends)."
-        (( APPLY )) && scp -q "$ROSTER" "$RIGEL_HOST:~/ml-capstone-platform/$(basename "$ROSTER")"
-        # Schema drift after a Coolify auto-upgrade would emit broken INSERTs.
-        ssh "$RIGEL_HOST" "cd ~/ml-capstone-platform && ./scripts/provision-teams.sh --check-schema" \
-            || fail "Coolify schema check failed on $RIGEL_HOST — do NOT proceed; see onboarding.md step 3a"
-        ssh "$RIGEL_HOST" "cd ~/ml-capstone-platform && ./scripts/provision-teams.sh --roster '$(basename "$ROSTER")' ${APPLY_FLAG[*]}" \
-            || fail "provision-teams.sh failed on $RIGEL_HOST"
-    fi
+            if (( APPLY )); then
+                info "Copying the roster to $COOLIFY_HOST (student PII — gitignored on both ends)."
+                scp -q "$ROSTER" "$COOLIFY_HOST:~/ml-capstone-platform/$(basename "$ROSTER")" \
+                    || fail "could not copy the roster to $COOLIFY_HOST"
+            fi
+            # Schema drift after a Coolify auto-upgrade would emit broken INSERTs.
+            ssh "$COOLIFY_HOST" "cd ~/ml-capstone-platform && ./scripts/provision-teams.sh --check-schema" \
+                || fail "Coolify schema check failed on $COOLIFY_HOST — do NOT proceed; see onboarding.md step 3a"
+            ssh "$COOLIFY_HOST" "cd ~/ml-capstone-platform && ./scripts/provision-teams.sh --roster '$(basename "$ROSTER")' ${APPLY_FLAG[*]}" \
+                || fail "provision-teams.sh failed on $COOLIFY_HOST"
+            ;;
+    esac
 fi
 
 # ---- Phase 5: verify -----------------------------------------------------

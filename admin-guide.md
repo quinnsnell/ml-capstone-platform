@@ -362,7 +362,13 @@ The gate **exits non-zero (code 2) rather than continuing**, so a half-accepted 
 
 ### The two things that need a different machine or a human
 
-- **Phase 4 runs on rigel.** `provision-teams.sh` writes directly to Coolify's Postgres and needs docker access to the `coolify-db` container. `term-start.sh` detects whether it is already on the Coolify host and otherwise drives it over ssh, copying the roster up first. It always runs `--check-schema` before applying — a Coolify auto-upgrade that renamed a column would otherwise produce silently broken INSERTs.
+- **Phase 4 must run on the Coolify host.** `provision-teams.sh` writes directly to Coolify's Postgres through `docker exec`, so it only works on the machine running the `coolify-db` container.
+
+  `term-start.sh` decides where it is by **probing for that container**, not by checking the hostname — Coolify lives on rigel today and may not forever. If the probe finds `coolify-db` locally it provisions in place. If not, it requires `--coolify-host` (or `$COOLIFY_HOST`), and runs the *same probe over ssh* before touching anything: a host that is merely reachable under the expected name, but isn't actually running Coolify, is refused rather than provisioned against. Moving Coolify means passing a new `--coolify-host`; nothing else changes.
+
+  If Docker is present locally but unusable, it says so and names the fix (`usermod -aG docker`) instead of silently falling through to the remote path.
+
+  It always runs `--check-schema` before applying — a Coolify auto-upgrade that renamed a column would otherwise produce silently broken INSERTs.
 - **Students provision their own Applications.** The instructor never creates Applications or Deploy Webhooks; that is Part B of [`student-guide.md`](student-guide.md).
 
 ### FERPA
