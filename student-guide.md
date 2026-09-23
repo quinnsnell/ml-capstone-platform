@@ -711,6 +711,8 @@ Then on the General page:
 - **Name**: rename the auto-generated `<your-repo>:staging-<longhash>` to something readable like `<your-repo>-staging`. Save.
 - **Access → gear icon on "1 configured domain"** (or **Domains tab**): add a new domain — protocol `http://`, domain `<your-repo>-staging.ml-capstone.cs.byu.edu`, port `8000`. Delete the `<longhash>.sslip.io` placeholder and the `www.` variant if Coolify added it. Do NOT click "Generate Domain". Save.
 
+> **Saving a domain does not re-route a container that is already running.** Traefik decides where a request goes using labels baked into the container when it started, so a container launched before you set the domain keeps the old rule and your new URL answers `404 page not found`. If the app is already deployed, hit **Redeploy** after saving. Setting the domain *before* your first deploy avoids this entirely — which is why this step comes before you push anything.
+
 Then **Advanced → Deployment → Manual deployments only** (same as production). If your app needs a GPU, configure **Advanced → GPU** the same way — see the settings under Step 5. Remember the save quirk: commit Advanced changes by hitting Save on the **General** tab afterward.
 
 ### 7. Grab the Deploy Webhook URLs (in Coolify)
@@ -2580,7 +2582,16 @@ Open `terraform/main.tf` in your editor. Every block is commented — read them,
 - `resource "coolify_application" ...` — the two Applications. Block-level comments explain oddities like `ports_exposes = "80"` for dockercompose apps (Coolify silently forces the value; sending anything else errors out).
 - `resource "github_actions_secret" ...` — the three secrets. The two webhook secrets have their URLs built from the Application UUIDs via `locals` and string interpolation, so no manual copy-paste from the UI is needed.
 
-`variables.tf` shows the inputs — what you supply in `terraform.tfvars` versus what has a class-default already filled in (server UUID, GitHub App UUID, etc.).
+`variables.tf` shows the inputs — what you supply in `terraform.tfvars` versus what has a class-default already filled in.
+
+Note that **`coolify_server_uuid` has no default and you must look yours up.** Coolify creates a separate server record per team: they are all named `ml-capstone` and all point at the same physical machine, but each has its own UUID, so there is no value that works for everyone. With the token you just created:
+
+```bash
+curl -H "Authorization: Bearer <your-coolify-token>" \
+  https://ml-capstone-admin.cs.byu.edu/api/v1/servers
+```
+
+Exactly one server comes back — copy its `uuid` into `terraform.tfvars`. (The GitHub App UUID *is* genuinely shared across teams, so that one keeps its default.)
 
 `outputs.tf` shows what terraform returns after apply — UUIDs, URLs, and the `next_steps` message printed at the end.
 

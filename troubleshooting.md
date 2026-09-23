@@ -122,6 +122,22 @@ Check in order:
    - `COOLIFY_DEPLOY_WEBHOOK_PROD` secret is the exact URL from Coolify's Webhooks tab
 4. **Deployed and marked healthy?** Coolify's health check polls `/health`. If `/health` returns 5xx (LLM unreachable, model failed to load, etc.), the deploy is marked unhealthy and the old version keeps serving.
 
+### App URL returns "404 page not found"
+
+That plain-text 404 is Traefik saying *no route exists for this hostname* — it is not your app returning 404, and it is not DNS (a DNS failure gives a connection error instead). Three causes, in the order to check them:
+
+1. **Nothing has been deployed yet.** Creating an Application and setting its domain does not start a container. Until a deploy finishes, there is no service behind the hostname. Push to the branch, or hit Deploy in Coolify, and watch it complete.
+
+2. **The domain was set after the container started.** Traefik routes on labels baked in at container start, so a container launched before you saved the domain keeps the old rule. Hit **Redeploy**. Confirm afterwards with:
+
+   ```bash
+   docker inspect <container> --format '{{json .Config.Labels}}' | grep -o 'Host(`[^`]*`)'
+   ```
+
+   Your domain should appear in that list.
+
+3. **You are on `https://`.** Student apps are routed on the HTTP entrypoint only, because the `*.cs.byu.edu` wildcard cert covers one level and these hostnames are two levels deep. An HTTPS request finds no matching router and gets a **503 "no available server"** rather than a 404 — so if you are seeing 503 instead, switch to `http://`. Some browsers upgrade silently.
+
 ### App URL returns "Bad Gateway" or Traefik-branded error
 
 Container is running but not reachable from Coolify's proxy. Most common causes:
