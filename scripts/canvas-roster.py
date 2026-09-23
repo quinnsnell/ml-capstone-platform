@@ -66,10 +66,13 @@ QUESTIONS = [
         "type": "essay_question",
         "text": (
             "<p>What <strong>email address</strong> is on your GitHub account?</p>"
-            "<p>If it's the same BYU address Canvas has for you, just answer "
-            "<code>same</code>. Otherwise give the address you actually sign in with "
-            "&mdash; Coolify matches your login against this, so a mismatch locks you "
-            "out of the deployment platform.</p>"
+            "<p>Type the full address, even if it is the same BYU address Canvas "
+            "already has for you.</p>"
+            "<p>This is the address you sign in to GitHub with. The class "
+            "deployment platform matches your login against it, so if this is wrong "
+            "you will not be able to sign in. Check it at "
+            "<a href='https://github.com/settings/emails'>github.com/settings/emails</a> "
+            "if you are not sure.</p>"
         ),
         "key": "github_email",
     },
@@ -322,12 +325,15 @@ def clean_username(raw):
     s = (raw or "").strip()
     if not s:
         return ""
-    s = re.sub(r"^https?://(www\.)?github\.com/", "", s, flags=re.I)
+    # Handles every shape students actually paste: full URL, scheme-less
+    # "github.com/octocat", with or without www, with or without a trailing slash.
+    s = re.sub(r"^(?:https?://)?(?:www\.)?github\.com/", "", s, flags=re.I)
     s = s.split("/")[0].split("?")[0].lstrip("@").strip()
     return s
 
 
 GITHUB_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
 
 
 def github_exists(username):
@@ -384,7 +390,7 @@ def cmd_build(args):
     students = cv.students()
     answers = parse_responses(fetch_responses(cv, quiz["id"]))
 
-    rows, skipped, warnings = [], [], []
+    rows, skipped, warnings, differing = [], [], [], []
     used_teams = {}
 
     for s in sorted(students, key=lambda u: u.get("sortable_name") or u.get("name") or ""):
@@ -402,14 +408,19 @@ def cmd_build(args):
             skipped.append((name, canvas_email, f"implausible GitHub username {gh!r}"))
             continue
 
-        # Coolify matches on the email the student signs in to GitHub with.
-        stated = rec.get("github_email", "")
-        email = canvas_email
-        if stated and stated.lower() not in ("same", "same as canvas", "n/a", "-"):
-            if "@" in stated:
-                email = stated
-                if stated.lower() != canvas_email.lower():
-                    warnings.append(f"{name}: GitHub email {stated} differs from Canvas {canvas_email}")
+        # Coolify matches OAuth logins against the email on the GitHub account,
+        # so that address -- not the Canvas one -- is what belongs in the roster.
+        # The survey always asks for it outright; no "same as Canvas" shortcut,
+        # because that answer is ambiguous the moment a student mistypes it.
+        email = (rec.get("github_email") or "").strip()
+        if not email:
+            skipped.append((name, canvas_email, "no GitHub email given"))
+            continue
+        if not EMAIL_RE.match(email):
+            skipped.append((name, canvas_email, f"implausible GitHub email {email!r}"))
+            continue
+        if email.lower() != canvas_email.lower():
+            differing.append(name)
 
         team = args.team_template.format(name=name, first=name.split()[0] if name else gh, github=gh)
         if team in used_teams:
@@ -435,6 +446,11 @@ def cmd_build(args):
         w.writerows(rows)
 
     print(f"\nWrote {len(rows)} rows to {out}")
+    if differing:
+        print(f"\n{len(differing)} student(s) use a non-Canvas email on GitHub "
+              f"(expected, and the roster uses the GitHub one):")
+        for n in differing:
+            print(f"  · {n}")
     if warnings:
         print(f"\n{len(warnings)} warning(s) — fix these before provisioning:")
         for wmsg in warnings:

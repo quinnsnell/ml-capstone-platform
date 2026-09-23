@@ -63,7 +63,7 @@ Generate the token in Canvas under **Account → Settings → Approved Integrati
 Creates and publishes an ungraded Canvas survey titled *Class Cluster Setup*, with unlimited retakes so students can fix a typo. It asks three things:
 
 - **GitHub username** — the field Canvas can't give you. A typo here sends the org invite into the void, so the question spells out exactly what format to use.
-- **GitHub email** — Coolify matches OAuth logins against this. Students whose GitHub account uses a personal address would otherwise be locked out of the deploy platform with no obvious cause.
+- **GitHub email** — every student types the full address, even when it matches their BYU one. Coolify matches OAuth logins against it, so a student whose GitHub uses a personal address would otherwise be locked out of the deploy platform with no obvious cause. There is deliberately no "same as Canvas" shortcut: that answer is ambiguous the moment someone picks it by mistake, and the roster would silently carry the wrong address.
 - **CS VPN access** — asks them to actually run the `curl` against the classroom LLM and report the result. This surfaces the VPN entitlement gap (see the previous section) in week one instead of mid-lab.
 
 The script refuses to create a second quiz with the same title unless you pass `--force`.
@@ -91,7 +91,7 @@ Writes `roster-2026-fall.csv`. What it handles for you:
 - **Derives `team_name`** as `<First>'s Sandbox`, matching `roster-example.csv`. Two students sharing a first name get disambiguated by GitHub username. Override with `--team-template "{github}-sandbox"` or similar.
 - **Refuses to guess.** Anyone without a usable response is listed as skipped rather than silently dropped or half-provisioned. Re-running `build` after they respond is safe.
 
-Check the warnings before provisioning. A GitHub email that differs from the Canvas one is flagged but kept — that's usually legitimate, and the GitHub address is the one Coolify needs.
+Check the warnings before provisioning. The roster's `email` column is always the **GitHub** address, since that's what Coolify authenticates against; `build` prints which students use a non-Canvas one so you know who to expect questions from. A student who leaves the email blank or types something that isn't an address is skipped rather than guessed at.
 
 Rosters are gitignored (FERPA). Keep them on rigel; `scp` from your laptop as needed.
 
