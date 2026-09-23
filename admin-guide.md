@@ -317,7 +317,9 @@ Canvas knows every student's name and email. It does **not** know their GitHub u
 
 Credentials come from a gitignored `.env` (`CANVAS_HOST`, `CANVAS_COURSE`, `CANVAS_TOKEN`). The survey asks for the GitHub username, the email on the GitHub account (Coolify matches OAuth logins against it), and whether the CS VPN actually works — that last one surfaces the entitlement gap in week one instead of mid-lab.
 
-`build` normalises pasted profile URLs and `@handles`, verifies usernames resolve, keeps `team_name` unique, and lists anyone without a usable response as skipped rather than guessing. Re-running it is always safe.
+`build` normalises pasted profile URLs and `@handles`, verifies usernames resolve, and lists anyone without a usable response as skipped rather than guessing. Re-running it is always safe.
+
+`team_name` defaults to **`<Full Name>'s Sandbox`** — full name, not first name. In a class of 30 a shared first name is near-certain, and "Alice's Sandbox" is ambiguous anyway when you are scanning 30 teams in the Coolify UI. Two students with identical full names are still disambiguated by GitHub username. Override with `--team-template`; `{name}`, `{first}` and `{github}` are available.
 
 ### Running the sequence
 

@@ -553,7 +553,11 @@ def main():
     p = sub.add_parser("build", help="write roster-<term>.csv")
     p.add_argument("--term", default="current", help="used in the filename")
     p.add_argument("--out", help="explicit output path")
-    p.add_argument("--team-template", default="{first}'s Sandbox",
+    # Full name, not first name. In a class of 30 a shared first name is close
+    # to certain, and "Alice's Sandbox" is also ambiguous when scanning 30 teams
+    # in the Coolify UI. Full names still collide occasionally, which the
+    # GitHub-username qualifier handles.
+    p.add_argument("--team-template", default="{name}'s Sandbox",
                    help="team_name pattern; {name} {first} {github} (default: %(default)s)")
     p.add_argument("--verify-github", action="store_true",
                    help="check each username exists via the gh CLI")

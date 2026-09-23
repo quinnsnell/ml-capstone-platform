@@ -65,9 +65,14 @@ done
 # Examples:
 #   "Alice's Sandbox" -> "alice-s-sandbox"
 #   "Group 1"         -> "group-1"
+# NOTE: -E (ERE) is required for portability. With a basic regex, "\+" is a
+# literal plus on BSD sed, so on macOS the substitutions silently do nothing and
+# slugs come out as "alice smith's sandbox" -- spaces, apostrophe and all. GNU
+# sed on rigel accepted "\+", which is why this survived: the same roster
+# produced different slugs depending on which machine ran the script.
 slugify() {
     local s="$1"
-    s=$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]' | LC_ALL=C sed -e 's/[^a-z0-9]\+/-/g' -e 's/^-\+//' -e 's/-\+$//')
+    s=$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]' | LC_ALL=C sed -E -e 's/[^a-z0-9]+/-/g' -e 's/^-+//' -e 's/-+$//')
     printf '%s' "$s"
 }
 
@@ -117,6 +122,34 @@ done < <(tail -n +2 "$ROSTER")
 if (( ${#TEAM_SLUG[@]} == 0 )); then
     echo "No valid team_name+github_username rows in roster. Nothing to do." >&2
     exit 0
+fi
+
+# Distinct team names can still collapse to the same slug -- slugify keeps only
+# [a-z0-9], so names differing solely by non-ASCII characters ("李伟's Sandbox"
+# vs "王芳's Sandbox") both reduce to "s-sandbox". Silently merging two students
+# into one team is worse than stopping, so check before creating anything.
+declare -A SLUG_OWNER=()
+slug_problem=0
+for team_name in "${!TEAM_SLUG[@]}"; do
+    slug="${TEAM_SLUG[$team_name]}"
+    if [[ -z "$slug" ]]; then
+        printf '  ERROR    team_name %s produces an empty GitHub slug\n' "$team_name" >&2
+        slug_problem=1
+        continue
+    fi
+    if [[ -n "${SLUG_OWNER[$slug]:-}" ]]; then
+        printf '  ERROR    team_name %s and %s both slug to %s\n' \
+            "$team_name" "${SLUG_OWNER[$slug]}" "$slug" >&2
+        slug_problem=1
+        continue
+    fi
+    SLUG_OWNER[$slug]="$team_name"
+done
+if (( slug_problem )); then
+    echo "" >&2
+    echo "Fix the team_name values in the roster so each yields a distinct slug" >&2
+    echo "(GitHub slugs keep only a-z, 0-9 and dashes), then re-run." >&2
+    exit 1
 fi
 
 # ---- Plan ---------------------------------------------------------------

@@ -1,7 +1,7 @@
 team_name,email,name,github_username
-Alice's Sandbox,alice@byu.edu,Alice Smith,alice-smith
-Bob's Sandbox,bob@byu.edu,Bob Jones,bjones-dev
-Carol's Sandbox,carol@byu.edu,Carol Nguyen,cnguyen42
+Alice Smith's Sandbox,alice@byu.edu,Alice Smith,alice-smith
+Bob Jones's Sandbox,bob@byu.edu,Bob Jones,bjones-dev
+Carol Nguyen's Sandbox,carol@byu.edu,Carol Nguyen,cnguyen42
 # Later, after groups form, append rows without removing the individual ones:
 # Group 1,alice@byu.edu,Alice Smith,alice-smith
 # Group 1,carol@byu.edu,Carol Nguyen,cnguyen42
