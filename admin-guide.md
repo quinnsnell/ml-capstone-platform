@@ -444,6 +444,16 @@ Phases 4 and 5 always resolve to the *same* machine. Provisioning over ssh and t
   It always runs `--check-schema` before applying — a Coolify auto-upgrade that renamed a column would otherwise produce silently broken INSERTs.
 - **Students provision their own Applications.** The instructor never creates Applications or Deploy Webhooks; that is Part B of [`student-guide.md`](student-guide.md).
 
+### Things students will ask about that are not obvious
+
+Found while running the whole pipeline end to end against a real student repo:
+
+- **Each team has its own Coolify server record.** They are all named `ml-capstone` and all point at rigel, but each team's row has a different UUID. There is no shared value, so the Terraform bonus lab makes `coolify_server_uuid` a required input with a lookup command rather than shipping a default that is right for exactly one student.
+- **The `root` API-token permission does not exist outside the Root Team.** Students see only `read`, `write`, `deploy`, `read:sensitive`, and which of those they can tick depends on their role in the *currently active* team (`ApiTokenPolicy::useWritePermissions` requires admin or owner). `provision-teams.sh` gives each student `admin` on their own team, so they can create the `write` + `deploy` token the lab needs — but they must switch to their own team first, because the token is scoped to whichever team is active.
+- **Saving a domain does not re-route a running container.** Traefik routes on labels baked in at container start. A domain set after the first deploy needs a Redeploy before the URL works; setting it beforehand avoids the problem.
+- **`https://` on a student app returns 503, not a cert error.** The routers bind the HTTP entrypoint only, since the `*.cs.byu.edu` wildcard covers one level and student hostnames are two deep.
+- **"Use this template" with *Include all branches* produces unrelated branch histories,** which makes `staging` → `main` pull requests impossible. Students now create `staging` from `main` themselves.
+
 ### FERPA
 
 Roster CSVs contain real student emails and GitHub usernames. `.gitignore` covers `roster-*.csv` (with `roster-example.csv` deliberately exempt so the format stays discoverable) and `.env`. Keep rosters on rigel and `scp` as needed; never commit one.
