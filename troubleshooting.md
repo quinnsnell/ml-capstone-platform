@@ -122,6 +122,19 @@ Check in order:
    - `COOLIFY_DEPLOY_WEBHOOK_PROD` secret is the exact URL from Coolify's Webhooks tab
 4. **Deployed and marked healthy?** Coolify's health check polls `/health`. If `/health` returns 5xx (LLM unreachable, model failed to load, etc.), the deploy is marked unhealthy and the old version keeps serving.
 
+### `docker compose up` fails: "Additional property start_interval is not allowed"
+
+Your Docker is too old. The template's health checks use `start_interval`, which probes frequently while a container is starting and then backs off — that's what keeps a fresh container detected in seconds without `pg_isready` running every 5 seconds for the rest of the day.
+
+It needs **Docker Engine 25+ / Compose 2.20+** (early 2024). Check yours:
+
+```bash
+docker version --format 'engine {{.Server.Version}}'
+docker compose version
+```
+
+Update Docker Desktop (Settings → Software updates), or on Linux update the `docker-ce` / `docker-compose-plugin` packages. Nothing else in the template needs a recent Docker.
+
 ### App URL returns "404 page not found"
 
 That plain-text 404 is Traefik saying *no route exists for this hostname* — it is not your app returning 404, and it is not DNS (a DNS failure gives a connection error instead). Three causes, in the order to check them:

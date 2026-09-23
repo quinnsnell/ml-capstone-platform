@@ -70,7 +70,7 @@ BYU runs two different gateways. They use the same client and they are **not** i
 Also make sure you have:
 
 - A **GitHub account** — the email you use for GitHub must match the one your instructor has on the class roster. That's how Coolify's login and the org invite find you.
-- **Docker installed locally** (for testing your app before pushing) — Docker Desktop on macOS and Windows, Docker Engine or Docker Desktop on Linux
+- **Docker installed locally** (for testing your app before pushing) — Docker Desktop on macOS and Windows, Docker Engine or Docker Desktop on Linux. **Keep it current**: the template's health checks use `start_interval`, which needs Docker Engine 25+ / Compose 2.20+ (early 2024). Anything Docker Desktop has shipped in the last couple of years is fine; a much older install fails with `Additional property start_interval is not allowed`.
 - **VS Code** or another editor of your choice
 
 ### Platform notes — read this if you're on Windows
