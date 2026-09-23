@@ -2475,7 +2475,9 @@ You'll need:
 
 2. **A fresh templated repo** just for the bonus, so `terraform destroy` won't touch your real project. Follow Part B Setup Step 1 to template a new repo from `byu-ml-capstone/hello-world-app`, name it something like `<yourname>-terraform-lab`, and `gh repo clone` it locally.
 
-3. **A Coolify API token.** In Coolify UI: dashboard menu (top-left Coolify wordmark) → Keys & Tokens → API Tokens → + New Token. Description: `terraform-lab`. Permissions: `root` (or view + create + deploy + delete). Create → copy immediately (Coolify shows it once).
+3. **A Coolify API token.** First **switch to your own team** in the team switcher — the token is scoped to whichever team is active when you create it, and that decides where your Applications land. Then: dashboard menu (top-left Coolify wordmark) → Keys & Tokens → API Tokens → + New Token. Description: `terraform-lab`. Permissions: tick **view, create, deploy, delete**. Create → copy immediately (Coolify shows it once).
+
+    > You will not see a `root` permission option, and you don't need one. `root` is only offered on tokens created in Coolify's Root Team, which is the instructor's. The four permissions above are what this lab uses.
 
 4. **A GitHub Personal Access Token** with `repo` scope: `gh auth token` if you have the gh CLI, otherwise Settings → Developer settings → Personal access tokens → Tokens (classic) → new token with `repo` scope. Copy immediately.
 
