@@ -40,6 +40,63 @@ Practical notes:
 
 ---
 
+## Term-start: build the roster from Canvas
+
+The three provisioning scripts all read a roster CSV with columns `team_name,email,name,github_username`. Canvas supplies the name and email; it has no idea what anyone's **GitHub username** is, and that's the one field every script depends on. `scripts/canvas-roster.py` closes that gap with a Canvas survey.
+
+**Credentials.** Create `.env` in the repo root (gitignored):
+
+```
+CANVAS_HOST=byu.instructure.com
+CANVAS_COURSE=35846
+CANVAS_TOKEN=<personal access token>
+```
+
+Generate the token in Canvas under **Account → Settings → Approved Integrations → + New Access Token**. It carries your full instructor privileges on every course you teach — treat it like a password, and set an expiry.
+
+### 1. Create the survey
+
+```bash
+./scripts/canvas-roster.py create-quiz
+```
+
+Creates and publishes an ungraded Canvas survey titled *Class Cluster Setup*, with unlimited retakes so students can fix a typo. It asks three things:
+
+- **GitHub username** — the field Canvas can't give you. A typo here sends the org invite into the void, so the question spells out exactly what format to use.
+- **GitHub email** — Coolify matches OAuth logins against this. Students whose GitHub account uses a personal address would otherwise be locked out of the deploy platform with no obvious cause.
+- **CS VPN access** — asks them to actually run the `curl` against the classroom LLM and report the result. This surfaces the VPN entitlement gap (see the previous section) in week one instead of mid-lab.
+
+The script refuses to create a second quiz with the same title unless you pass `--force`.
+
+> The survey is deliberately **not anonymous**. An anonymous Canvas survey cannot be joined back to a student, which would defeat the entire purpose.
+
+### 2. Chase the stragglers
+
+```bash
+./scripts/canvas-roster.py status
+```
+
+Prints how many students have submitted a usable response and names everyone who hasn't, with their email. It also lists students who reported a VPN problem — those need CS IT action, and the earlier you know, the better.
+
+### 3. Build the CSV
+
+```bash
+./scripts/canvas-roster.py build --term 2026-fall --verify-github
+```
+
+Writes `roster-2026-fall.csv`. What it handles for you:
+
+- **Normalises usernames.** Students paste `https://github.com/octocat`, `@octocat`, and `octocat ` — all become `octocat`.
+- **`--verify-github`** checks each username actually resolves, via the `gh` CLI. Catching a typo here costs seconds; catching it after provisioning costs a support thread.
+- **Derives `team_name`** as `<First>'s Sandbox`, matching `roster-example.csv`. Two students sharing a first name get disambiguated by GitHub username. Override with `--team-template "{github}-sandbox"` or similar.
+- **Refuses to guess.** Anyone without a usable response is listed as skipped rather than silently dropped or half-provisioned. Re-running `build` after they respond is safe.
+
+Check the warnings before provisioning. A GitHub email that differs from the Canvas one is flagged but kept — that's usually legitimate, and the GitHub address is the one Coolify needs.
+
+Rosters are gitignored (FERPA). Keep them on rigel; `scp` from your laptop as needed.
+
+---
+
 ## Term-start: run the three provisioning scripts
 
 Everything reads the same **roster CSV** with columns `team_name,email,name,github_username`. See `roster-example.csv` for the shape. Each script is idempotent — safe to re-run whenever the roster grows.
