@@ -413,6 +413,23 @@ Two things to watch:
 1. **Use the same `--term` every time.** `build` writes `roster-<term>.csv` and reads the previous copy at that same path to preserve team names. A different `--term` starts a fresh file with no history, and the stickiness is lost.
 2. **The gate blocks phases 3–4 for the whole roster**, so on day 2 you cannot finish until the newcomers accept. That is usually right — just wait. If you want to provision the ones who *have* accepted and catch the rest tomorrow, `--skip-gate` does that, and the re-run fills the gaps.
 
+### Where do I run all this?
+
+You do **not** have to do everything on rigel. The roster only needs to be on the Coolify host for phases 4–5, and `term-start.sh` copies it there for you.
+
+Two setups work:
+
+**From your laptop (recommended).** Phases 1–3 are Canvas and `gh` work that runs anywhere. Phases 4–5 need `docker exec` against `coolify-db`, so they are driven over ssh: the roster is `scp`'d up automatically and the scripts run on the Coolify host. You need:
+
+- `.env` with the Canvas credentials
+- `gh` authenticated as an org Owner
+- passwordless ssh to the Coolify host, with a `~/ml-capstone-platform` clone there
+- `gh` **also** authenticated on the Coolify host, because phase 5 checks GitHub membership *and* the Coolify database in one pass
+
+**Entirely on the Coolify host.** Then everything is local and no ssh is involved, but that host needs the Canvas token in `.env` and `gh` authenticated as an org Owner. Both approaches are equally supported; the script probes for `coolify-db` and picks the right path either way.
+
+Phases 4 and 5 always resolve to the *same* machine. Provisioning over ssh and then verifying locally would check a machine that has no Coolify on it — the script will not do that.
+
 ### The two things that need a different machine or a human
 
 - **Phase 4 must run on the Coolify host.** `provision-teams.sh` writes directly to Coolify's Postgres through `docker exec`, so it only works on the machine running the `coolify-db` container.

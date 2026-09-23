@@ -143,6 +143,32 @@ coolify_probe_remote() {
         >/dev/null 2>&1
 }
 
+# Resolve once where Coolify-touching work must happen. Echoes "local" or
+# "remote"; fails loudly when neither is possible. Both phase 4 (provisioning)
+# and phase 5 (verification) need docker access to coolify-db, so they must
+# agree -- running phase 4 over ssh and then phase 5 locally would "verify"
+# against a machine that has no Coolify on it.
+resolve_coolify_target() {
+    case "$(coolify_probe)" in
+        yes) echo local; return 0 ;;
+        denied)
+            fail "Docker is installed here but not usable by $(id -un).
+       This looks like the Coolify host, but the probe cannot see its containers.
+       Fix with:  sudo usermod -aG docker $(id -un)   then log out and back in." ;;
+    esac
+    [[ -n "$COOLIFY_HOST" ]] \
+        || fail "No --coolify-host given and this machine is not the Coolify host.
+       Pass --coolify-host <host>, or run this phase on the machine hosting Coolify."
+    ssh -o BatchMode=yes "$COOLIFY_HOST" true 2>/dev/null \
+        || fail "cannot ssh to '$COOLIFY_HOST' non-interactively. Fix ssh keys, or run
+       this phase directly on the Coolify host."
+    coolify_probe_remote "$COOLIFY_HOST" \
+        || fail "'$COOLIFY_HOST' is reachable but is NOT running $COOLIFY_DB_CONTAINER.
+       Refusing to provision against it. If Coolify has moved, pass the new host
+       with --coolify-host (or set COOLIFY_HOST in the environment)."
+    echo remote
+}
+
 pick_roster() {
     [[ -n "$ROSTER" ]] && { echo "$ROSTER"; return; }
     local newest
@@ -258,55 +284,47 @@ fi
 if should_run coolify; then
     banner "PHASE 4/5 — Coolify teams, users, server, destination"
     # provision-teams.sh writes directly to Coolify's Postgres via docker exec,
-    # so this phase MUST execute on the machine running coolify-db. Decide by
-    # probing for that container, never by hostname.
-    case "$(coolify_probe)" in
-        yes)
-            good "this machine is running $COOLIFY_DB_CONTAINER — provisioning locally"
-            "$SCRIPT_DIR/provision-teams.sh" --check-schema \
-                || fail "Coolify schema check failed — do NOT proceed; see onboarding.md step 3a"
-            "$SCRIPT_DIR/provision-teams.sh" --roster "$ROSTER" "${APPLY_FLAG[@]}" \
-                || fail "provision-teams.sh failed"
-            ;;
-        denied)
-            fail "Docker is installed here but not usable by $(id -un).
-       This looks like the Coolify host, but the probe cannot see its containers.
-       Fix with:  sudo usermod -aG docker $(id -un)   then log out and back in."
-            ;;
-        no)
-            info "$COOLIFY_DB_CONTAINER is not running here, so this is not the Coolify host."
-            [[ -n "$COOLIFY_HOST" ]] \
-                || fail "No --coolify-host given and this machine is not the Coolify host.
-       Pass --coolify-host <host>, or run this phase on the machine hosting Coolify."
-            info "Verifying $COOLIFY_HOST actually runs Coolify before touching anything..."
-            ssh -o BatchMode=yes "$COOLIFY_HOST" true 2>/dev/null \
-                || fail "cannot ssh to '$COOLIFY_HOST' non-interactively. Fix ssh keys, or run
-       this phase directly on the Coolify host."
-            coolify_probe_remote "$COOLIFY_HOST" \
-                || fail "'$COOLIFY_HOST' is reachable but is NOT running $COOLIFY_DB_CONTAINER.
-       Refusing to provision against it. If Coolify has moved, pass the new host
-       with --coolify-host (or set COOLIFY_HOST in the environment)."
-            good "$COOLIFY_HOST confirmed running $COOLIFY_DB_CONTAINER"
-
-            if (( APPLY )); then
-                info "Copying the roster to $COOLIFY_HOST (student PII — gitignored on both ends)."
-                scp -q "$ROSTER" "$COOLIFY_HOST:~/ml-capstone-platform/$(basename "$ROSTER")" \
-                    || fail "could not copy the roster to $COOLIFY_HOST"
-            fi
-            # Schema drift after a Coolify auto-upgrade would emit broken INSERTs.
-            ssh "$COOLIFY_HOST" "cd ~/ml-capstone-platform && ./scripts/provision-teams.sh --check-schema" \
-                || fail "Coolify schema check failed on $COOLIFY_HOST — do NOT proceed; see onboarding.md step 3a"
-            ssh "$COOLIFY_HOST" "cd ~/ml-capstone-platform && ./scripts/provision-teams.sh --roster '$(basename "$ROSTER")' ${APPLY_FLAG[*]}" \
-                || fail "provision-teams.sh failed on $COOLIFY_HOST"
-            ;;
-    esac
+    # so this phase MUST execute on the machine running coolify-db.
+    COOLIFY_TARGET="$(resolve_coolify_target)"
+    if [[ "$COOLIFY_TARGET" == local ]]; then
+        good "this machine is running $COOLIFY_DB_CONTAINER — provisioning locally"
+        "$SCRIPT_DIR/provision-teams.sh" --check-schema \
+            || fail "Coolify schema check failed — do NOT proceed; see onboarding.md step 3a"
+        "$SCRIPT_DIR/provision-teams.sh" --roster "$ROSTER" "${APPLY_FLAG[@]}" \
+            || fail "provision-teams.sh failed"
+    else
+        good "$COOLIFY_HOST confirmed running $COOLIFY_DB_CONTAINER"
+        if (( APPLY )); then
+            info "Copying the roster to $COOLIFY_HOST (student PII — gitignored on both ends)."
+            scp -q "$ROSTER" "$COOLIFY_HOST:~/ml-capstone-platform/$(basename "$ROSTER")" \
+                || fail "could not copy the roster to $COOLIFY_HOST"
+        fi
+        # Schema drift after a Coolify auto-upgrade would emit broken INSERTs.
+        ssh "$COOLIFY_HOST" "cd ~/ml-capstone-platform && ./scripts/provision-teams.sh --check-schema" \
+            || fail "Coolify schema check failed on $COOLIFY_HOST — do NOT proceed; see onboarding.md step 3a"
+        ssh "$COOLIFY_HOST" "cd ~/ml-capstone-platform && ./scripts/provision-teams.sh --roster '$(basename "$ROSTER")' ${APPLY_FLAG[*]}" \
+            || fail "provision-teams.sh failed on $COOLIFY_HOST"
+    fi
 fi
 
 # ---- Phase 5: verify -----------------------------------------------------
 if should_run verify; then
     banner "PHASE 5/5 — verify"
     if (( APPLY )); then
-        "$SCRIPT_DIR/verify-provisioning.sh" --roster "$ROSTER" || fail "verification found problems"
+        # verify-provisioning.sh needs BOTH gh AND docker access to coolify-db,
+        # so it runs wherever phase 4 ran -- never locally by default.
+        if [[ "$(resolve_coolify_target)" == local ]]; then
+            "$SCRIPT_DIR/verify-provisioning.sh" --roster "$ROSTER" \
+                || fail "verification found problems"
+        else
+            ssh -o BatchMode=yes "$COOLIFY_HOST" "command -v gh >/dev/null 2>&1 && gh auth status" >/dev/null 2>&1 \
+                || fail "verification needs the gh CLI authenticated on $COOLIFY_HOST (it checks
+       GitHub membership as well as Coolify's database). Authenticate gh there
+       with 'gh auth login', or run verify-provisioning.sh by hand where both
+       gh and docker are available."
+            ssh "$COOLIFY_HOST" "cd ~/ml-capstone-platform && ./scripts/verify-provisioning.sh --roster '$(basename "$ROSTER")'" \
+                || fail "verification found problems on $COOLIFY_HOST"
+        fi
         good "verification passed"
     else
         info "Skipped in preview mode — there is nothing provisioned yet to verify."
