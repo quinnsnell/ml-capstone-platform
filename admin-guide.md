@@ -335,8 +335,28 @@ Credentials come from a gitignored `.env` (`CANVAS_HOST`, `CANVAS_COURSE`, `CANV
 **Phase 3 cannot add a student to a GitHub Team until they have accepted the org invitation from phase 2.** That wait is measured in days. So the realistic shape of a term start is:
 
 1. Run phases 1–2, then tell students to accept the invite (syllabus deadline helps).
-2. Wait. `./scripts/term-start.sh --from teams` reports who is still outstanding without changing anything.
+2. Wait, checking in with `--only gate` (below).
 3. Once everyone is in, `--from teams --apply` finishes the job.
+
+**Who has and hasn't accepted:**
+
+```bash
+./scripts/term-start.sh --only gate
+```
+
+Read-only, changes nothing, and answers exactly that question:
+
+```
+1 of 2 accepted
+1 of 2 students have NOT accepted their invitation:
+  octocat — no invitation found (bad username?)
+```
+
+It distinguishes two failures that need different responses. *"Invited, not yet accepted"* means chase the student. *"No invitation found"* means the invite never landed — nearly always a mistyped GitHub username in the roster, which is worth fixing at the source (`canvas-roster.py build --verify-github`) rather than by hand.
+
+Exit code is 0 when everyone has accepted and 2 when anyone is outstanding, so it also works as a scripted precondition. The same check runs automatically before phases 3 and 4; `--only gate` just lets you ask without running anything else.
+
+For the same information outside this tooling: GitHub's org page under **People → Pending invitations**, or `gh api /orgs/byu-ml-capstone/invitations`.
 
 The gate **exits non-zero (code 2) rather than continuing**, so a half-accepted roster fails loudly instead of quietly provisioning a subset of the class and leaving you to discover the gap later. `--skip-gate` provisions everyone who *has* accepted; re-running afterwards fills in the rest.
 

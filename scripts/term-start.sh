@@ -27,6 +27,7 @@
 # Usage:
 #   ./term-start.sh                                   # preview everything
 #   ./term-start.sh --apply                           # execute
+#   ./term-start.sh --only gate                       # who hasn't accepted yet?
 #   ./term-start.sh --only roster                     # one phase
 #   ./term-start.sh --from teams --apply              # resume after the gate
 #   ./term-start.sh --term 2026-fall --apply
@@ -37,6 +38,7 @@
 #   --org NAME         GitHub org (default: byu-ml-capstone)
 #   --rigel-host HOST  ssh target for the Coolify phase (default: rigel)
 #   --only PHASE       Run a single phase: roster|invite|teams|coolify|verify
+#                      Also accepts: gate  (just report who has/hasn't accepted)
 #   --from PHASE       Start at PHASE and run everything after it
 #   --skip-gate        Proceed past the acceptance gate even if some are pending
 #   --apply            Actually make changes (default is preview)
@@ -99,8 +101,12 @@ should_run() {
 validate_phase_name() {
     local given="$1" label="$2"
     [[ -z "$given" ]] && return 0
+    # "gate" is checkable on its own but is not a member of PHASES -- putting it
+    # there would make "--from teams" skip the gate, which is the documented
+    # resume command and must always re-check acceptance.
+    [[ "$given" == "gate" && "$label" == "--only" ]] && return 0
     for p in "${PHASES[@]}"; do [[ "$p" == "$given" ]] && return 0; done
-    fail "$label: unknown phase '$given'. Valid: ${PHASES[*]}"
+    fail "$label: unknown phase '$given'. Valid: ${PHASES[*]}${label:+ (--only also accepts: gate)}"
 }
 validate_phase_name "$ONLY" "--only"
 validate_phase_name "$FROM" "--from"
@@ -185,11 +191,13 @@ for r in csv.DictReader(open('$ROSTER')):
     if u and not (r.get('team_name') or '').startswith('#') and u not in seen:
         seen.add(u); print(u)")
 
+    local accepted=$(( total - ${#pending[@]} ))
     if (( ${#pending[@]} == 0 )); then
         good "all $total students have accepted — safe to continue"
         return 0
     fi
 
+    good "$accepted of $total accepted"
     warn "${#pending[@]} of $total students have NOT accepted their invitation:"
     printf '  %s\n' "${pending[@]}"
     if (( SKIP_GATE )); then
@@ -202,6 +210,11 @@ for r in csv.DictReader(open('$ROSTER')):
     info "Or pass --skip-gate to provision everyone else now (safe: re-running fills the gaps)."
     exit 2
 }
+if [[ "$ONLY" == "gate" ]]; then
+    gate_acceptance
+    banner "DONE"
+    exit 0
+fi
 if should_run teams || should_run coolify; then
     gate_acceptance
 fi

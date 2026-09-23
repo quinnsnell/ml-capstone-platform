@@ -123,7 +123,7 @@ Students receive an email and GitHub notification. They must accept before step 
 
 ### 2. Wait for acceptance, then create GitHub Teams
 
-Wait a day (or set a syllabus deadline: "accept the org invite by Friday"). Then preview:
+Wait a day (or set a syllabus deadline: "accept the org invite by Friday"). Check who's outstanding at any point with `./scripts/term-start.sh --only gate` — read-only, and it separates "hasn't accepted yet" from "the invite never landed because the username is wrong". Then preview:
 ```bash
 ./scripts/provision-gh-teams.sh --roster roster-2026-fall.csv
 ```
