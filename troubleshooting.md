@@ -87,6 +87,30 @@ and fall back to `--tool-call-parser qwen3_coder`. vLLM's own docs recommend `qw
 
 ## Deploy / Coolify problems
 
+### Can't open a PR: "staging has no history in common with main"
+
+Your repo was created with **"Include all branches"** ticked. GitHub's template copy gives each branch its own separate initial commit, so `main` and `staging` share no ancestor and GitHub refuses to diff or merge them.
+
+Easiest fix, while `staging` has little or no unique work on it — rebuild `staging` from `main`:
+
+```bash
+git fetch origin
+git checkout main && git pull --ff-only
+git checkout -B staging main          # recreate staging on top of main
+# re-apply any staging-only work here, then:
+git push --force origin staging
+```
+
+Check it worked — this should report `ahead`, not an error:
+
+```bash
+gh api /repos/byu-ml-capstone/<your-repo>/compare/main...staging --jq .status
+```
+
+If `staging` already carries work you can't lose, cherry-pick those commits onto the rebuilt branch rather than force-pushing over them.
+
+Prevention: create `staging` from `main` yourself (`git checkout -b staging main`) instead of ticking "Include all branches" — see student-guide Setup Step 1.
+
 ### Push happened but the app didn't update
 
 Check in order:

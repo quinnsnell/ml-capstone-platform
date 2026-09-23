@@ -499,17 +499,27 @@ You'll create your class repo **inside the org**, not under your personal accoun
   - Group phase: `group1-sentiment`, `group3-recommender`
   - Your repo name becomes your deploy hostname prefix (thanks to wildcard DNS at `*.ml-capstone.cs.byu.edu`) — e.g., repo `alice-sentiment` → prod at `http://alice-sentiment.ml-capstone.cs.byu.edu`. Pick something you'll want to see in URLs.
 - **Public** or **Private** — either works; Private is fine and matches production practice
-- ✅ **CHECK the box "Include all branches"**. The template ships with `main` AND `staging` branches; by default GitHub only copies `main`. Without this checkbox you'll need to create `staging` yourself later, and the staging Coolify Application won't have a branch to track.
+- ❌ **Leave "Include all branches" UNCHECKED.** Copy only `main`. You will create `staging` from it in the next step — see the warning below for why this matters.
 - Click **Create repository from template**
 
-**Verify both branches copied over.** On your new repo's page, click the branch dropdown (top-left, above the file list) — you should see BOTH `main` and `staging` listed. If you only see `main`, you missed the "Include all branches" checkbox; delete the repo and redo the template step, OR recover by running:
+### Create your `staging` branch from `main`
 
 ```bash
 git clone https://github.com/byu-ml-capstone/<your-repo>.git
 cd <your-repo>
-git checkout -b staging
+git checkout -b staging main
 git push -u origin staging
 ```
+
+Confirm both branches now appear in your repo's branch dropdown (top-left, above the file list).
+
+> **Why not just tick "Include all branches"?** Because GitHub's template copy gives **each branch its own separate initial commit**. The branches end up with no shared history, and every later attempt to open a pull request from `staging` to `main` fails with:
+>
+> ```
+> The staging branch has no history in common with main
+> ```
+>
+> That kills the promote-to-production workflow you'll use all semester (Section 8), and it is painful to unpick after you have real work on both branches. Branching `staging` off `main` yourself takes one command and gives them a shared ancestor, which is what makes PRs work.
 
 You now have a fresh repo at `github.com/byu-ml-capstone/<your-repo>` populated with a minimal FastAPI (`/`, `/health`, `/languages`) and the 3-job CI/CD workflow. The `byu-ml-capstone-coolify` App already has access to it — no install step needed.
 
@@ -679,18 +689,20 @@ Then click the **Advanced** tab:
 
 Navigate up to the project (breadcrumb at top) → click into the **staging** Environment → **+ Add Resource → GitHub Repo (with GitHub App)**. Same flow as production, with these differences in the configuration panel:
 
-- **Branch**: `staging` — the branch dropdown should include this option if you ticked "Include all branches" during Step 1's template flow. If it doesn't, you missed the checkbox; see the callout below.
+- **Branch**: `staging` — the dropdown should list it if you created the branch in Setup Step 1. If it doesn't, see the callout below.
 - **Build Pack**: **Dockerfile** (same as production).
 - **Port**: `8000` — Coolify does NOT copy this from your production Application; every Application defaults to port 3000. Overriding to 8000 is easy to forget and the deploy will look healthy but the domain returns "Bad Gateway".
 
-> **If the `staging` branch dropdown is missing:** you skipped "Include all branches" when creating your repo. Recover on your laptop:
+> **If the `staging` branch dropdown is missing:** you haven't created it yet. On your laptop:
 >
 > ```bash
 > git clone https://github.com/byu-ml-capstone/<your-repo>.git
 > cd <your-repo>
-> git checkout -b staging
+> git checkout -b staging main
 > git push -u origin staging
 > ```
+>
+> Branch it off `main` (as shown) rather than ticking "Include all branches" when templating — see Setup Step 1 for why.
 >
 > Then click the **Refresh Repository List** button in Coolify's picker and the `staging` branch should appear.
 
@@ -747,10 +759,10 @@ cd <your-repo>
 git branch -a
 ```
 
-You should see both `main` and `staging` (assuming you ticked "Include all branches" in Step 1). If `staging` is missing:
+You should see both `main` and `staging` (you created `staging` in Setup Step 1). If `staging` is missing:
 
 ```bash
-git checkout -b staging
+git checkout -b staging main
 git push -u origin staging
 git checkout main
 ```
