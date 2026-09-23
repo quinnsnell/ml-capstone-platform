@@ -41,6 +41,8 @@
 #   --only PHASE       Run a single phase: roster|invite|teams|coolify|verify
 #                      Also accepts: gate  (just report who has/hasn't accepted)
 #   --from PHASE       Start at PHASE and run everything after it
+#   --observer EMAIL   Add this admin to every provisioned team so they appear in
+#                      your Coolify team switcher (default: $OPERATOR_EMAIL)
 #   --skip-gate        Proceed past the acceptance gate even if some are pending
 #   --apply            Actually make changes (default is preview)
 #   -h, --help         This message
@@ -55,6 +57,12 @@ ROSTER=""
 ORG=byu-ml-capstone
 COOLIFY_HOST="${COOLIFY_HOST:-rigel}"
 COOLIFY_DB_CONTAINER="${COOLIFY_DB_CONTAINER:-coolify-db}"
+# Observer: an admin added to every provisioned team, so the teams show up in
+# YOUR Coolify team switcher and you can help a student without a DB dance.
+# Matches provision-teams.sh / verify-provisioning.sh, including the
+# OPERATOR_EMAIL fallback -- but that env var does not survive ssh, so when the
+# Coolify phase runs remotely it is passed explicitly.
+OBSERVER="${OPERATOR_EMAIL:-}"
 ONLY=""
 FROM=""
 SKIP_GATE=0
@@ -72,6 +80,7 @@ while [[ $# -gt 0 ]]; do
         --only)        ONLY="$2";      shift 2 ;;
         --from)        FROM="$2";      shift 2 ;;
         --skip-gate)   SKIP_GATE=1;    shift ;;
+        --observer)    OBSERVER="$2";  shift 2 ;;
         --apply)       APPLY=1;        shift ;;
         -h|--help)     sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "ERROR: unknown argument: $1" >&2; echo "Run with --help." >&2; exit 1 ;;
@@ -117,6 +126,13 @@ validate_phase_name "$FROM" "--from"
 # Underlying scripts all default to preview and take --apply to execute.
 APPLY_FLAG=()
 (( APPLY )) && APPLY_FLAG=(--apply)
+
+OBSERVER_FLAG=()
+OBSERVER_ARG=""            # same thing, quoted for the remote command string
+if [[ -n "$OBSERVER" ]]; then
+    OBSERVER_FLAG=(--observer "$OBSERVER")
+    OBSERVER_ARG="--observer '$OBSERVER'"
+fi
 
 # ---- "Am I the Coolify host?" --------------------------------------------
 # Probe for the capability that actually matters -- a usable local Docker with
@@ -283,6 +299,13 @@ fi
 # ---- Phase 4: Coolify (runs on rigel) -----------------------------------
 if should_run coolify; then
     banner "PHASE 4/5 — Coolify teams, users, server, destination"
+    if [[ -n "$OBSERVER" ]]; then
+        info "Observer: $OBSERVER will be admin of every team (visible in your team switcher)."
+    else
+        warn "No --observer set. Provisioned teams will NOT appear in your Coolify team"
+        warn "switcher, so helping a student means a manual DB dance. Pass --observer"
+        warn "<your-email>, or set OPERATOR_EMAIL, unless you deliberately want that."
+    fi
     # provision-teams.sh writes directly to Coolify's Postgres via docker exec,
     # so this phase MUST execute on the machine running coolify-db.
     COOLIFY_TARGET="$(resolve_coolify_target)"
@@ -290,7 +313,7 @@ if should_run coolify; then
         good "this machine is running $COOLIFY_DB_CONTAINER — provisioning locally"
         "$SCRIPT_DIR/provision-teams.sh" --check-schema \
             || fail "Coolify schema check failed — do NOT proceed; see onboarding.md step 3a"
-        "$SCRIPT_DIR/provision-teams.sh" --roster "$ROSTER" "${APPLY_FLAG[@]}" \
+        "$SCRIPT_DIR/provision-teams.sh" --roster "$ROSTER" "${OBSERVER_FLAG[@]}" "${APPLY_FLAG[@]}" \
             || fail "provision-teams.sh failed"
     else
         good "$COOLIFY_HOST confirmed running $COOLIFY_DB_CONTAINER"
@@ -312,7 +335,7 @@ if should_run coolify; then
             || { (( APPLY )) || ssh "$COOLIFY_HOST" "rm -f ~/ml-capstone-platform/$REMOTE_ROSTER"
                  fail "Coolify schema check failed on $COOLIFY_HOST — do NOT proceed; see onboarding.md step 3a"; }
 
-        ssh "$COOLIFY_HOST" "cd ~/ml-capstone-platform && ./scripts/provision-teams.sh --roster '$REMOTE_ROSTER' ${APPLY_FLAG[*]}" \
+        ssh "$COOLIFY_HOST" "cd ~/ml-capstone-platform && ./scripts/provision-teams.sh --roster '$REMOTE_ROSTER' $OBSERVER_ARG ${APPLY_FLAG[*]}" \
             || { (( APPLY )) || ssh "$COOLIFY_HOST" "rm -f ~/ml-capstone-platform/$REMOTE_ROSTER"
                  fail "provision-teams.sh failed on $COOLIFY_HOST"; }
 
@@ -327,7 +350,7 @@ if should_run verify; then
         # verify-provisioning.sh needs BOTH gh AND docker access to coolify-db,
         # so it runs wherever phase 4 ran -- never locally by default.
         if [[ "$(resolve_coolify_target)" == local ]]; then
-            "$SCRIPT_DIR/verify-provisioning.sh" --roster "$ROSTER" \
+            "$SCRIPT_DIR/verify-provisioning.sh" --roster "$ROSTER" "${OBSERVER_FLAG[@]}" \
                 || fail "verification found problems"
         else
             ssh -o BatchMode=yes "$COOLIFY_HOST" "command -v gh >/dev/null 2>&1 && gh auth status" >/dev/null 2>&1 \
@@ -343,7 +366,7 @@ if should_run verify; then
             scp -q "$ROSTER" "$COOLIFY_HOST:~/ml-capstone-platform/$VERIFY_ROSTER" \
                 || fail "could not copy the roster to $COOLIFY_HOST for verification"
             verify_rc=0
-            ssh "$COOLIFY_HOST" "cd ~/ml-capstone-platform && ./scripts/verify-provisioning.sh --roster '$VERIFY_ROSTER'" \
+            ssh "$COOLIFY_HOST" "cd ~/ml-capstone-platform && ./scripts/verify-provisioning.sh --roster '$VERIFY_ROSTER' $OBSERVER_ARG" \
                 || verify_rc=$?
             ssh "$COOLIFY_HOST" "rm -f ~/ml-capstone-platform/$VERIFY_ROSTER"
             (( verify_rc == 0 )) || fail "verification found problems on $COOLIFY_HOST"
