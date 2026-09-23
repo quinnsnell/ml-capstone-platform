@@ -294,16 +294,29 @@ if should_run coolify; then
             || fail "provision-teams.sh failed"
     else
         good "$COOLIFY_HOST confirmed running $COOLIFY_DB_CONTAINER"
+        # The remote side needs the roster to even build a plan, so it is copied
+        # in preview too -- but to a temp path that is removed afterwards, so a
+        # preview still leaves nothing behind.
         if (( APPLY )); then
+            REMOTE_ROSTER="$(basename "$ROSTER")"
             info "Copying the roster to $COOLIFY_HOST (student PII — gitignored on both ends)."
-            scp -q "$ROSTER" "$COOLIFY_HOST:~/ml-capstone-platform/$(basename "$ROSTER")" \
-                || fail "could not copy the roster to $COOLIFY_HOST"
+        else
+            REMOTE_ROSTER=".preview-$(basename "$ROSTER")"
+            info "Copying the roster to $COOLIFY_HOST as a temp file (removed after the preview)."
         fi
+        scp -q "$ROSTER" "$COOLIFY_HOST:~/ml-capstone-platform/$REMOTE_ROSTER" \
+            || fail "could not copy the roster to $COOLIFY_HOST"
+
         # Schema drift after a Coolify auto-upgrade would emit broken INSERTs.
         ssh "$COOLIFY_HOST" "cd ~/ml-capstone-platform && ./scripts/provision-teams.sh --check-schema" \
-            || fail "Coolify schema check failed on $COOLIFY_HOST — do NOT proceed; see onboarding.md step 3a"
-        ssh "$COOLIFY_HOST" "cd ~/ml-capstone-platform && ./scripts/provision-teams.sh --roster '$(basename "$ROSTER")' ${APPLY_FLAG[*]}" \
-            || fail "provision-teams.sh failed on $COOLIFY_HOST"
+            || { (( APPLY )) || ssh "$COOLIFY_HOST" "rm -f ~/ml-capstone-platform/$REMOTE_ROSTER"
+                 fail "Coolify schema check failed on $COOLIFY_HOST — do NOT proceed; see onboarding.md step 3a"; }
+
+        ssh "$COOLIFY_HOST" "cd ~/ml-capstone-platform && ./scripts/provision-teams.sh --roster '$REMOTE_ROSTER' ${APPLY_FLAG[*]}" \
+            || { (( APPLY )) || ssh "$COOLIFY_HOST" "rm -f ~/ml-capstone-platform/$REMOTE_ROSTER"
+                 fail "provision-teams.sh failed on $COOLIFY_HOST"; }
+
+        (( APPLY )) || ssh "$COOLIFY_HOST" "rm -f ~/ml-capstone-platform/$REMOTE_ROSTER"
     fi
 fi
 

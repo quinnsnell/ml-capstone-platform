@@ -444,7 +444,10 @@ def cmd_build(args):
         if uid in seen_ids:
             continue
         seen_ids.add(uid)
-        name = (s.get("name") or "").strip()
+        # Canvas names arrive with stray internal whitespace ("Joseph   Dahlke",
+        # "Julia  Ann Knecht" are both real). Collapse it: the name is templated
+        # straight into team_name, which becomes a Coolify team name verbatim.
+        name = re.sub(r"\s+", " ", (s.get("name") or "")).strip()
         canvas_email = (s.get("email") or s.get("login_id") or "").strip()
         rec = answers.get(uid)
 
