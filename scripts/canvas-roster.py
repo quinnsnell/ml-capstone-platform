@@ -244,15 +244,33 @@ def cmd_create_quiz(args):
         cv.post(f"/courses/{cv.course}/quizzes/{qid}/questions", data)
         print(f"  + {q['name']}")
 
-    cv._request("PUT", f"/courses/{cv.course}/quizzes/{qid}",
-                data={"quiz[published]": "true"})
-    print("\nPublished. Send students here:")
+    if args.draft:
+        print("\nLeft UNPUBLISHED. Review it, then publish from the Canvas UI:")
+    else:
+        cv._request("PUT", f"/courses/{cv.course}/quizzes/{qid}",
+                    data={"quiz[published]": "true"})
+        print("\nPublished. Send students here:")
     print(f"  {quiz.get('html_url')}")
 
 
 # --------------------------------------------------------------------------
 # Reading responses (student_analysis report -> CSV)
 # --------------------------------------------------------------------------
+def quiz_question_ids(cv, quiz_id):
+    """-> {question_name: question_id}
+
+    student_analysis columns are named "<question id>: <question text>". The id
+    prefix is exact; the text is HTML-stripped and truncated by Canvas, so
+    matching on it is guesswork. Prefer the id.
+    """
+    out = {}
+    for q in cv.get_paginated(f"/courses/{cv.course}/quizzes/{quiz_id}/questions"):
+        name = (q.get("question_name") or "").strip()
+        if name:
+            out[name] = q["id"]
+    return out
+
+
 def find_quiz(cv, title):
     for q in cv.get_paginated(f"/courses/{cv.course}/quizzes"):
         if q.get("title") == title:
@@ -288,22 +306,28 @@ def fetch_responses(cv, quiz_id):
     die("timed out waiting for Canvas to generate the report")
 
 
-def column_for(fieldnames, needle):
-    """Report columns are '<question id>: <question text>'. Match on text."""
+def column_for(fieldnames, needle, qid=None):
+    """Find an answer column: by question id when known, else by text."""
+    if qid is not None:
+        prefix = f"{qid}:"
+        for name in fieldnames:
+            if (name or "").strip().startswith(prefix):
+                return name
     for name in fieldnames:
         if needle.lower() in (name or "").lower():
             return name
     return None
 
 
-def parse_responses(rows):
+def parse_responses(rows, qids=None):
     """-> {canvas_user_id: {github_username, github_email, vpn_ok}}"""
     if not rows:
         return {}
+    qids = qids or {}
     cols = list(rows[0].keys())
-    col_user = column_for(cols, "GitHub username") or column_for(cols, "username")
-    col_mail = column_for(cols, "GitHub email") or column_for(cols, "email")
-    col_vpn = column_for(cols, "CS VPN") or column_for(cols, "vpn")
+    col_user = column_for(cols, "GitHub username", qids.get("GitHub username"))
+    col_mail = column_for(cols, "GitHub email", qids.get("GitHub email"))
+    col_vpn = column_for(cols, "CS VPN", qids.get("CS VPN access"))
 
     out = {}
     for row in rows:
@@ -357,7 +381,8 @@ def cmd_status(args):
     cv = canvas_from_env()
     quiz = find_quiz(cv, args.title)
     students = cv.students()
-    answers = parse_responses(fetch_responses(cv, quiz["id"]))
+    answers = parse_responses(fetch_responses(cv, quiz["id"]),
+                              quiz_question_ids(cv, quiz["id"]))
 
     done, missing = [], []
     for s in students:
@@ -388,13 +413,17 @@ def cmd_build(args):
     cv = canvas_from_env()
     quiz = find_quiz(cv, args.title)
     students = cv.students()
-    answers = parse_responses(fetch_responses(cv, quiz["id"]))
+    answers = parse_responses(fetch_responses(cv, quiz["id"]),
+                              quiz_question_ids(cv, quiz["id"]))
 
     rows, skipped, warnings, differing = [], [], [], []
-    used_teams = {}
 
+    seen_ids = set()
     for s in sorted(students, key=lambda u: u.get("sortable_name") or u.get("name") or ""):
         uid = str(s["id"])
+        if uid in seen_ids:
+            continue
+        seen_ids.add(uid)
         name = (s.get("name") or "").strip()
         canvas_email = (s.get("email") or s.get("login_id") or "").strip()
         rec = answers.get(uid)
@@ -422,13 +451,22 @@ def cmd_build(args):
         if email.lower() != canvas_email.lower():
             differing.append(name)
 
-        team = args.team_template.format(name=name, first=name.split()[0] if name else gh, github=gh)
-        if team in used_teams:
-            team = f"{team} ({gh})"   # two students sharing a first name
-        used_teams[team] = True
-
-        rows.append({"team_name": team, "email": email,
+        base = args.team_template.format(
+            name=name, first=name.split()[0] if name else gh, github=gh)
+        rows.append({"team_name": base, "email": email,
                      "name": name, "github_username": gh})
+
+    # team_name becomes a GitHub team slug and a Coolify team name, so it has to
+    # be unique. Resolve collisions symmetrically: if a base name is shared, EVERY
+    # student holding it gets the qualifier. Suffixing only the later arrival
+    # would hand one of two Alices a clean name and the other a parenthesised one
+    # purely by sort order.
+    counts = {}
+    for r in rows:
+        counts[r["team_name"]] = counts.get(r["team_name"], 0) + 1
+    for r in rows:
+        if counts[r["team_name"]] > 1:
+            r["team_name"] = f"{r['team_name']} ({r['github_username']})"
 
     if args.verify_github:
         print("Verifying GitHub usernames resolve...", file=sys.stderr)
@@ -472,6 +510,8 @@ def main():
 
     p = sub.add_parser("create-quiz", help="create + publish the survey in Canvas")
     p.add_argument("--force", action="store_true", help="create even if the title exists")
+    p.add_argument("--draft", action="store_true",
+                   help="leave unpublished so you can review it before students see it")
     p.set_defaults(func=cmd_create_quiz)
 
     p = sub.add_parser("status", help="who has responded, who hasn't")

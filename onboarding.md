@@ -66,7 +66,7 @@ Creates and publishes an ungraded Canvas survey titled *Class Cluster Setup*, wi
 - **GitHub email** — every student types the full address, even when it matches their BYU one. Coolify matches OAuth logins against it, so a student whose GitHub uses a personal address would otherwise be locked out of the deploy platform with no obvious cause. There is deliberately no "same as Canvas" shortcut: that answer is ambiguous the moment someone picks it by mistake, and the roster would silently carry the wrong address.
 - **CS VPN access** — asks them to actually run the `curl` against the classroom LLM and report the result. This surfaces the VPN entitlement gap (see the previous section) in week one instead of mid-lab.
 
-The script refuses to create a second quiz with the same title unless you pass `--force`.
+The script refuses to create a second quiz with the same title unless you pass `--force`. Pass `--draft` to leave it unpublished so you can read it over in the Canvas UI before 30 students can see it.
 
 > The survey is deliberately **not anonymous**. An anonymous Canvas survey cannot be joined back to a student, which would defeat the entire purpose.
 
@@ -88,7 +88,7 @@ Writes `roster-2026-fall.csv`. What it handles for you:
 
 - **Normalises usernames.** Students paste `https://github.com/octocat`, `@octocat`, and `octocat ` — all become `octocat`.
 - **`--verify-github`** checks each username actually resolves, via the `gh` CLI. Catching a typo here costs seconds; catching it after provisioning costs a support thread.
-- **Derives `team_name`** as `<First>'s Sandbox`, matching `roster-example.csv`. Two students sharing a first name get disambiguated by GitHub username. Override with `--team-template "{github}-sandbox"` or similar.
+- **Derives `team_name`** as `<First>'s Sandbox`, matching `roster-example.csv`. `team_name` becomes a GitHub team slug and a Coolify team name, so it must be unique: when two students share a first name, *both* get qualified with their GitHub username rather than one keeping the clean name by luck of sort order. Override the pattern with `--team-template "{github}-sandbox"` or similar.
 - **Refuses to guess.** Anyone without a usable response is listed as skipped rather than silently dropped or half-provisioned. Re-running `build` after they respond is safe.
 
 Check the warnings before provisioning. The roster's `email` column is always the **GitHub** address, since that's what Coolify authenticates against; `build` prints which students use a non-Canvas one so you know who to expect questions from. A student who leaves the email blank or types something that isn't an address is skipped rather than guessed at.
