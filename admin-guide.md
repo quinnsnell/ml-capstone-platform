@@ -360,6 +360,32 @@ For the same information outside this tooling: GitHub's org page under **People 
 
 The gate **exits non-zero (code 2) rather than continuing**, so a half-accepted roster fails loudly instead of quietly provisioning a subset of the class and leaving you to discover the gap later. `--skip-gate` provisions everyone who *has* accepted; re-running afterwards fills in the rest.
 
+### Adding students later (the normal case)
+
+Students miss the first class. The whole sequence is built to be re-run over the **entire** class list as stragglers trickle in — never a separate "just the new people" path, which is how rosters drift apart.
+
+A realistic two-day term start:
+
+| | Day 1 (in class) | Day 2 (absentees take the survey) |
+|---|---|---|
+| Roster | `build` → 3 students | `build` → 5 students, 3 carried over unchanged |
+| Invites | `--only invite --apply` | same command; day-1 students report `EXISTS-active` |
+| Gate | all 3 accept in class | blocks on the 2 new ones until they accept |
+| Teams + Coolify | `--from teams --apply` | same command; existing rows plan as `EXISTS` |
+
+Every stage is a no-op for anyone already provisioned:
+
+- **`canvas-roster.py build`** rebuilds from Canvas plus all survey responses to date, and **never renames an already-issued `team_name`**. That matters: `team_name` is a live GitHub team slug and a live Coolify team name, so renaming one would orphan the real team and create a duplicate on the next run. Students carried over keep exactly what they had; only newcomers get disambiguated. The run prints `N carried over unchanged, M newly added`.
+- **`invite-to-org.sh`** reports `EXISTS-active` or `EXISTS-pending` and re-invites nobody.
+- **`provision-gh-teams.sh`** reuses existing teams and skips members already in them.
+- **`provision-teams.sh`** plans each row as `CREATE` or `EXISTS`, and its SQL is `NOT EXISTS`-guarded regardless.
+- **`verify-provisioning.sh`** is read-only.
+
+Two things to watch:
+
+1. **Use the same `--term` every time.** `build` writes `roster-<term>.csv` and reads the previous copy at that same path to preserve team names. A different `--term` starts a fresh file with no history, and the stickiness is lost.
+2. **The gate blocks phases 3–4 for the whole roster**, so on day 2 you cannot finish until the newcomers accept. That is usually right — just wait. If you want to provision the ones who *have* accepted and catch the rest tomorrow, `--skip-gate` does that, and the re-run fills the gaps.
+
 ### The two things that need a different machine or a human
 
 - **Phase 4 must run on the Coolify host.** `provision-teams.sh` writes directly to Coolify's Postgres through `docker exec`, so it only works on the machine running the `coolify-db` container.

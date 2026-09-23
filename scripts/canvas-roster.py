@@ -418,6 +418,26 @@ def cmd_build(args):
 
     rows, skipped, warnings, differing = [], [], [], []
 
+    # Sticky team names. A roster is built incrementally: students who miss the
+    # first class take the survey later, and `build` gets re-run over the whole
+    # class. An already-provisioned student's team_name must NEVER change --
+    # it is a live GitHub team slug and a live Coolify team name, so renaming it
+    # orphans the real team and creates a duplicate on the next provisioning run.
+    # Whatever a student was assigned last time, they keep.
+    prev_teams, prev_names = {}, set()
+    prev_path = args.out or os.path.join(REPO_ROOT, f"roster-{args.term}.csv")
+    if os.path.exists(prev_path):
+        with open(prev_path, newline="") as fh:
+            for r in csv.DictReader(fh):
+                u = (r.get("github_username") or "").strip()
+                t = (r.get("team_name") or "").strip()
+                if u and t and not t.startswith("#"):
+                    prev_teams[u.lower()] = t
+                    prev_names.add(t)
+        if prev_teams:
+            print(f"Existing roster {os.path.basename(prev_path)}: "
+                  f"{len(prev_teams)} student(s) keep their current team name.")
+
     seen_ids = set()
     for s in sorted(students, key=lambda u: u.get("sortable_name") or u.get("name") or ""):
         uid = str(s["id"])
@@ -453,20 +473,31 @@ def cmd_build(args):
 
         base = args.team_template.format(
             name=name, first=name.split()[0] if name else gh, github=gh)
-        rows.append({"team_name": base, "email": email,
-                     "name": name, "github_username": gh})
+        rows.append({"team_name": prev_teams.get(gh.lower()) or base,
+                     "email": email, "name": name, "github_username": gh,
+                     "_base": base, "_held": gh.lower() in prev_teams})
 
-    # team_name becomes a GitHub team slug and a Coolify team name, so it has to
-    # be unique. Resolve collisions symmetrically: if a base name is shared, EVERY
-    # student holding it gets the qualifier. Suffixing only the later arrival
-    # would hand one of two Alices a clean name and the other a parenthesised one
-    # purely by sort order.
+    # team_name becomes a GitHub team slug and a Coolify team name, so it must be
+    # unique. Students carried over from a previous build are immovable; only
+    # newcomers can be renamed.
+    #
+    # Among newcomers alone, resolve collisions symmetrically -- otherwise, of two
+    # students sharing a first name, whichever sorted first would keep the clean
+    # name purely by luck. Against an incumbent, the newcomer always yields.
+    new_rows = [r for r in rows if not r["_held"]]
     counts = {}
+    for r in new_rows:
+        counts[r["_base"]] = counts.get(r["_base"], 0) + 1
+    for r in new_rows:
+        clashes_new = counts[r["_base"]] > 1
+        clashes_old = r["_base"] in prev_names
+        if clashes_new or clashes_old:
+            r["team_name"] = f"{r['_base']} ({r['github_username']})"
+
+    carried = sum(1 for r in rows if r["_held"])
+    added = len(rows) - carried
     for r in rows:
-        counts[r["team_name"]] = counts.get(r["team_name"], 0) + 1
-    for r in rows:
-        if counts[r["team_name"]] > 1:
-            r["team_name"] = f"{r['team_name']} ({r['github_username']})"
+        r.pop("_base", None); r.pop("_held", None)
 
     if args.verify_github:
         print("Verifying GitHub usernames resolve...", file=sys.stderr)
@@ -484,6 +515,8 @@ def cmd_build(args):
         w.writerows(rows)
 
     print(f"\nWrote {len(rows)} rows to {out}")
+    if carried:
+        print(f"  {carried} carried over unchanged, {added} newly added")
     if differing:
         print(f"\n{len(differing)} student(s) use a non-Canvas email on GitHub "
               f"(expected, and the roster uses the GitHub one):")
