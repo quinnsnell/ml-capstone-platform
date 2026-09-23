@@ -8,6 +8,10 @@ on:
       - 'docs/**'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
+  # The mirrored template README lives in another repo, so nothing here changes
+  # when it does. A daily rebuild keeps the published copy from going stale.
+  schedule:
+    - cron: '17 9 * * *'
 
 permissions:
   contents: read
@@ -30,6 +34,11 @@ jobs:
           mkdir -p "$HOME/.mdbook/bin"
           curl -sSL "https://github.com/rust-lang/mdBook/releases/download/${MDBOOK_VERSION}/mdbook-${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz" | tar -xz -C "$HOME/.mdbook/bin"
           echo "$HOME/.mdbook/bin" >> "$GITHUB_PATH"
+
+      # The student template lives in its own repo and is gitignored here, so
+      # its READMEs are mirrored in at build time rather than copied into git.
+      - name: Mirror template app docs
+        run: ./scripts/fetch-template-docs.sh
 
       - name: Build site
         run: |

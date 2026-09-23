@@ -105,3 +105,8 @@ testing/*/
 # Ad-hoc scripts kept local
 # =============================================================================
 sendsimplemessage.py
+
+# Mirrored into docs/src at build time by scripts/fetch-template-docs.sh from
+# byu-ml-capstone/hello-world-app. Generated, never edited here.
+docs/src/template-app.md
+docs/src/template-terraform.md

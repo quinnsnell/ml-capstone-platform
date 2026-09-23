@@ -6,6 +6,11 @@
 
 - [Student Setup Guide](student-guide.md)
 
+# Template App
+
+- [Template App README](template-app.md)
+- [Terraform Lab](template-terraform.md)
+
 # For Instructors
 
 - [Administrator Guide](admin-guide.md)
