@@ -301,9 +301,34 @@ Getting a class onto the platform is five steps in a fixed order, with one unavo
 2. invite    invite-to-org.sh            GitHub org invitations
 -  GATE      students must ACCEPT those invitations        (days, not minutes)
 3. teams     provision-gh-teams.sh       GitHub Teams + membership
-4. coolify   provision-teams.sh          Coolify teams/users/server  (on rigel)
+4. coolify   provision-teams.sh          Coolify teams/users/server  (on the Coolify host)
 5. verify    verify-provisioning.sh      read-only check of all of it
 ```
+
+### The whole thing, end to end
+
+First time only — create `.env` in the repo root (gitignored) with `CANVAS_HOST`, `CANVAS_COURSE` and `CANVAS_TOKEN`. The token comes from Canvas under **Account → Settings → Approved Integrations → + New Access Token**; it carries your full instructor privileges, so give it an expiry.
+
+```bash
+# --- before class ---------------------------------------------------------
+./scripts/canvas-roster.py create-quiz --draft     # review it, publish in Canvas
+
+# --- in class -------------------------------------------------------------
+./scripts/canvas-roster.py status                  # who has answered
+./scripts/term-start.sh --term 2026-fall           # preview: changes nothing
+./scripts/term-start.sh --term 2026-fall --apply   # roster + invites, stops at the gate
+
+# --- students accept the GitHub invitation --------------------------------
+./scripts/term-start.sh --only gate                # who is still outstanding
+
+# --- once they have accepted ----------------------------------------------
+./scripts/term-start.sh --term 2026-fall --from teams --apply
+
+# --- as stragglers appear, repeat over the WHOLE class --------------------
+./scripts/term-start.sh --term 2026-fall --apply
+```
+
+Everything above is safe to re-run. Use the same `--term` each time.
 
 ### Where the roster comes from
 
