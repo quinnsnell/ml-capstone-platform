@@ -416,7 +416,7 @@ def cmd_build(args):
     answers = parse_responses(fetch_responses(cv, quiz["id"]),
                               quiz_question_ids(cv, quiz["id"]))
 
-    rows, skipped, warnings, differing = [], [], [], []
+    rows, skipped, warnings, differing, recovered = [], [], [], [], []
 
     # Sticky team names. A roster is built incrementally: students who miss the
     # first class take the survey later, and `build` gets re-run over the whole
@@ -424,7 +424,7 @@ def cmd_build(args):
     # it is a live GitHub team slug and a live Coolify team name, so renaming it
     # orphans the real team and creates a duplicate on the next provisioning run.
     # Whatever a student was assigned last time, they keep.
-    prev_teams, prev_names = {}, set()
+    prev_teams, prev_names, prev_by_name = {}, set(), {}
     prev_path = args.out or os.path.join(REPO_ROOT, f"roster-{args.term}.csv")
     if os.path.exists(prev_path):
         with open(prev_path, newline="") as fh:
@@ -434,6 +434,12 @@ def cmd_build(args):
                 if u and t and not t.startswith("#"):
                     prev_teams[u.lower()] = t
                     prev_names.add(t)
+                    # Keyed by name because a student whose latest response went
+                    # blank gives us no username to key on -- the name is the
+                    # only field that survives, since it comes from Canvas.
+                    nm = re.sub(r"\s+", " ", (r.get("name") or "")).strip().lower()
+                    if nm:
+                        prev_by_name[nm] = dict(r)
         if prev_teams:
             print(f"Existing roster {os.path.basename(prev_path)}: "
                   f"{len(prev_teams)} student(s) keep their current team name.")
@@ -452,6 +458,19 @@ def cmd_build(args):
         rec = answers.get(uid)
 
         if not rec or not rec.get("github_username"):
+            # A student who retakes the survey to update one answer can leave the
+            # others blank, and "latest attempt wins" would then erase them from
+            # the roster -- including someone already invited and provisioned.
+            # If we captured a good row for them before, keep it.
+            carried_row = prev_by_name.get(name.lower())
+            if carried_row and (carried_row.get("github_username") or "").strip():
+                rows.append({"team_name": carried_row["team_name"],
+                             "email": carried_row["email"],
+                             "name": carried_row["name"],
+                             "github_username": carried_row["github_username"],
+                             "_base": carried_row["team_name"], "_held": True})
+                recovered.append(name)
+                continue
             skipped.append((name, canvas_email, "no survey response"))
             continue
 
@@ -520,6 +539,11 @@ def cmd_build(args):
     print(f"\nWrote {len(rows)} rows to {out}")
     if carried:
         print(f"  {carried} carried over unchanged, {added} newly added")
+    if recovered:
+        print(f"\n{len(recovered)} student(s) kept from the previous roster because their"
+              f"\nlatest survey response was incomplete (they retook it and left fields blank):")
+        for n in recovered:
+            print(f"  · {n}")
     if differing:
         print(f"\n{len(differing)} student(s) use a non-Canvas email on GitHub "
               f"(expected, and the roster uses the GitHub one):")
