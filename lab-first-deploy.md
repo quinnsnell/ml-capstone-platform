@@ -163,12 +163,19 @@ Then: click the **Coolify** wordmark (top-left) → **Keys & Tokens → API Toke
 + New Token**
 
 - Description: `terraform`
-- Permissions: tick **`write`** and **`deploy`**
+- Permissions: tick **`root`**
 - Expires: 1 year
 - Create — then **copy it immediately**. Coolify shows it exactly once.
 
-> You will not see a `root` permission option. That exists only in the
-> instructor's Root Team. `write` + `deploy` is what this lab needs.
+> **Why `root` and not `write` + `deploy`?** Coolify's permissions are mutually
+> exclusive in a way the UI does not explain: clicking `deploy` clears everything
+> else you had selected, so you cannot hold `write` and `deploy` together.
+> Terraform needs both — `write` to create your applications, `deploy` to trigger
+> deploys — and `root` is the single option that covers them.
+>
+> `root` here means root **of your own team**, not of the whole Coolify instance.
+> Your token can only see and change your team's resources. If `root` is greyed
+> out, you are looking at a team you are only a member of — switch to your own.
 
 ---
 

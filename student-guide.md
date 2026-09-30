@@ -664,9 +664,9 @@ On **Linux or WSL**, use HashiCorp's repo — see [developer.hashicorp.com/terra
 
 **Switch to your own team in the team switcher first.** The token is scoped to whichever team is active when you create it, and that decides where your Applications get created.
 
-Then: Coolify wordmark (top-left) → **Keys & Tokens → API Tokens → + New Token**. Description `terraform`. Permissions: tick **`write`** and **`deploy`**. Expires: 1 year. Create, and **copy it immediately** — Coolify shows it once.
+Then: Coolify wordmark (top-left) → **Keys & Tokens → API Tokens → + New Token**. Description `terraform`. Permissions: tick **`root`**. Expires: 1 year. Then click **Create Token**, and **copy it immediately** — Coolify shows it once.
 
-> You will not see a `root` permission option. That exists only in the instructor's Root Team, and this doesn't need it.
+> **Why `root`?** Coolify's permission checkboxes are mutually exclusive in a way the UI doesn't explain — clicking `deploy` clears everything else, so `write` and `deploy` cannot both be held. Terraform needs both, and `root` is the one option that covers them. It means root of *your own team*, not the whole instance. If `root` is greyed out you're on a team you're only a member of — switch to your own team first.
 
 ### A3. Look up your server UUID
 
@@ -2623,9 +2623,9 @@ You'll need:
 
 2. **A fresh templated repo** just for the bonus, so `terraform destroy` won't touch your real project. Follow Part B Setup Step 1 to template a new repo from `byu-ml-capstone/hello-world-app`, name it something like `<yourname>-terraform-lab`, and `gh repo clone` it locally.
 
-3. **A Coolify API token.** First **switch to your own team** in the team switcher — the token is scoped to whichever team is active when you create it, and that decides where your Applications land. Then: dashboard menu (top-left Coolify wordmark) → Keys & Tokens → API Tokens → + New Token. Description: `terraform-lab`. Permissions: tick **view, create, deploy, delete**. Create → copy immediately (Coolify shows it once).
+3. **A Coolify API token.** First **switch to your own team** in the team switcher — the token is scoped to whichever team is active when you create it, and that decides where your Applications land. Then: dashboard menu (top-left Coolify wordmark) → Keys & Tokens → API Tokens → + New Token. Description: `terraform-lab`. Permissions: tick **`root`**. Then click **Create Token** and copy it immediately (Coolify shows it once).
 
-    > You will not see a `root` permission option, and you don't need one. `root` is only offered on tokens created in Coolify's Root Team, which is the instructor's. The four permissions above are what this lab uses.
+    > The permission checkboxes are mutually exclusive — clicking `deploy` clears the others — so you cannot combine `write` and `deploy`, which is what this lab needs. `root` covers both, and means root of *your own team* only. If it's greyed out, switch to your own team first.
 
 4. **A GitHub Personal Access Token** with `repo` scope: `gh auth token` if you have the gh CLI, otherwise Settings → Developer settings → Personal access tokens → Tokens (classic) → new token with `repo` scope. Copy immediately.
 
