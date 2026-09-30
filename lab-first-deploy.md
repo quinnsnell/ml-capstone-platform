@@ -115,6 +115,26 @@ end — that is the point of having two branches.
 If `git branch -a` shows only `main`, go back to step 1 — the **Include all
 branches** box was missed.
 
+### One command before you start working
+
+```bash
+git checkout -B staging main
+git push --force origin staging
+```
+
+**Do this now, before you change anything.** When GitHub copies a template it
+gives each branch its own separate first commit, so `main` and `staging` start
+life with no shared history. Git will refuse to open a pull request between them
+later:
+
+```
+pull request create failed: The staging branch has no history in common with main
+```
+
+At this moment the two branches hold identical files, so rebuilding `staging` on
+top of `main` costs you nothing and loses nothing. Do it after you have real work
+on `staging` and it costs you that work.
+
 ---
 
 ## 4. Start the local build now
@@ -380,8 +400,19 @@ curl -s http://<your-repo>-staging.ml-capstone.cs.byu.edu/health
 # {"ok":true,"version":"0.1.2"}
 ```
 
-Check production too — still on the old version. **That is the point.** Nothing
-reaches production until you promote it.
+Now check production:
+
+```bash
+curl -s http://<your-repo>.ml-capstone.cs.byu.edu/health
+# 404 page not found
+```
+
+**A 404 is the correct answer.** Nothing has ever been deployed to production —
+the Application exists and has a domain, but no container has been built for it.
+`deploy-prod` only runs on a push to `main`, and you have not made one.
+
+That is the whole point of two environments: your change is live and testable on
+staging, and production is untouched until you decide otherwise.
 
 > Editing only `*.md` files will not trigger CI — the workflow ignores them on
 > purpose. Change code.
@@ -390,12 +421,43 @@ reaches production until you promote it.
 
 ## 12. Promote to production
 
+### What a pull request is
+
+A **pull request** — PR — proposes merging one branch into another. It is not a
+git feature; it is a GitHub workflow built on top of one. It gives you three
+things a direct merge does not:
+
+- **a place to review** the diff before it lands
+- **a place to run checks** — your tests run against the merged result
+- **a record** of what changed, when, and who approved it
+
+On a team, this is where someone else reads your code. Working alone, it is still
+the checkpoint where you look at what you are about to put in front of users.
+
+### Open it
+
 ```bash
 gh pr create --base main --head staging --title "Promote 0.1.2 to production"
 ```
 
-Or open the PR in the GitHub UI. Watch the checks run on the PR — `test` passes,
-both deploy jobs skip, because a PR is not a push to a deploy branch.
+`gh` will then prompt you:
+
+- **Body** — a description. Press `e` to open an editor, or just leave it empty
+  and continue. For this one, something like *"Version bump validated on staging"*
+  is plenty.
+- **What's next?** — choose **Submit**.
+
+Or click **Compare & pull request** in the GitHub UI, which does the same thing.
+
+Watch the checks run on the PR — `test` passes, and both deploy jobs skip, because
+a pull request is not a push to a deploy branch. Nothing deploys from a PR.
+
+> **`The staging branch has no history in common with main`** means you skipped
+> the rebuild in step 3. Fix it now:
+> ```bash
+> git checkout -B staging main     # rebuild staging on main
+> ```
+> then re-apply your version bump, commit, and `git push --force origin staging`.
 
 Merge it. Then watch Actions again: `test` passes, `deploy-prod` runs,
 `deploy-staging` skips. When it finishes:

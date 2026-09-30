@@ -91,7 +91,7 @@ and fall back to `--tool-call-parser qwen3_coder`. vLLM's own docs recommend `qw
 
 Your repo was created with **"Include all branches"** ticked. GitHub's template copy gives each branch its own separate initial commit, so `main` and `staging` share no ancestor and GitHub refuses to diff or merge them.
 
-Easiest fix, while `staging` has little or no unique work on it — rebuild `staging` from `main`:
+Prevent it by rebuilding `staging` on `main` immediately after cloning, while the branches still hold identical files (lab step 3). To fix it after the fact, while `staging` has little unique work on it:
 
 ```bash
 git fetch origin
