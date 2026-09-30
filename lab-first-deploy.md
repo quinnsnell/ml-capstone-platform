@@ -309,27 +309,46 @@ already references them by exactly these names.
 Terraform cannot do this. Coolify's API will not accept per-service domains on a
 Docker Compose application, so it stays a UI step and is documented as one.
 
-For **each** of your two Applications:
+**Do this before your first deploy.** Traefik bakes routing labels into a
+container when it starts, so a domain set afterwards leaves your URL returning
+`404 page not found` until you hit **Redeploy**.
 
-**Access → the gear icon on "1 configured domain"** (or the **Domains** tab) →
-under service **`hello`**, set the domain → **Save**
+### Click by click, for staging
 
-| Application | Domain |
-|---|---|
-| staging | `http://<your-repo>-staging.ml-capstone.cs.byu.edu` |
-| production | `http://<your-repo>.ml-capstone.cs.byu.edu` |
+1. Left sidebar → **Projects**
+2. Click **your project** — the name you chose in step 1.
+   *Do not click the gear icon on that row.*
+3. Click **staging**.
+   *Again, not the gear icon.*
+4. Click your one resource. It is named something like
+   `<your-repo>:staging-<random text>` — the random part is normal.
+5. In the **Access** section, click the **gear icon** next to *"1 configured domain"*
+6. Click **+ Add**
+7. **Service:** `hello` — this dropdown lists your containers, and `hello` is the
+   only one users should reach
+8. **Protocol:** `http` — check it, do not assume
+9. **Domain:** `<your-repo>-staging.ml-capstone.cs.byu.edu`
+   — **without** the `http://`; the protocol is the separate dropdown above
+10. **Port:** leave it empty. Traefik works out the routing.
+11. **Path:** leave it empty too.
+12. Click **Save**
 
-Delete the auto-generated `<longhash>.sslip.io` placeholder and the `www.`
+### Then production
+
+Same path, but click **production** at step 3, and the resource will be named
+`<your-repo>:main-<random text>`. The domain is your repo name with no suffix:
+
+`<your-repo>.ml-capstone.cs.byu.edu`
+
+### While you are there
+
+Delete the auto-generated `<longhash>.sslip.io` placeholder, and the `www.`
 variant if Coolify added one. Do **not** click "Generate Domain".
 
 > **`http://`, not `https://`.** The CS wildcard certificate covers one level
 > under `cs.byu.edu` and these names are two levels deep, so student apps are
 > routed on HTTP only. An `https://` request returns `503 no available server`,
-> not a certificate warning.
-
-> **Do this before your first deploy.** Traefik bakes routing labels into a
-> container when it starts. Set the domain afterwards and your URL returns
-> `404 page not found` until you hit **Redeploy**.
+> not a certificate warning — which looks like a broken deploy but isn't.
 
 ---
 

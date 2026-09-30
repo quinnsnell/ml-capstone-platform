@@ -838,7 +838,7 @@ Navigate up to the project (breadcrumb at top) → click into the **staging** En
 Then on the General page:
 
 - **Name**: rename the auto-generated `<your-repo>:staging-<longhash>` to something readable like `<your-repo>-staging`. Save.
-- **Access → gear icon on "1 configured domain"** (or **Domains tab**): add a new domain — protocol `http://`, domain `<your-repo>-staging.ml-capstone.cs.byu.edu`, port `8000`. Delete the `<longhash>.sslip.io` placeholder and the `www.` variant if Coolify added it. Do NOT click "Generate Domain". Save.
+- **Access → gear icon on "1 configured domain"** (or **Domains tab**) → **+ Add**. Service: `hello`. Protocol: `http`. Domain: `<your-repo>-staging.ml-capstone.cs.byu.edu` — **without** the `http://`, since the protocol is its own dropdown. Leave **Port** and **Path** empty; Traefik works out the routing. Delete the `<longhash>.sslip.io` placeholder and the `www.` variant if Coolify added it. Do NOT click "Generate Domain". Save.
 
 > **Saving a domain does not re-route a container that is already running.** Traefik decides where a request goes using labels baked into the container when it started, so a container launched before you set the domain keeps the old rule and your new URL answers `404 page not found`. If the app is already deployed, hit **Redeploy** after saving. Setting the domain *before* your first deploy avoids this entirely — which is why this step comes before you push anything.
 
