@@ -434,20 +434,42 @@ things a direct merge does not:
 On a team, this is where someone else reads your code. Working alone, it is still
 the checkpoint where you look at what you are about to put in front of users.
 
-### Open it
+Note that `git` itself has no pull-request command — there is no `git pr`. Pull
+requests live on GitHub, so you open one either in the browser or with GitHub's
+CLI.
+
+### Open it in the browser
+
+Nothing to install, and you see the diff you are proposing:
+
+1. Go to your repository on GitHub. Because you just pushed, a yellow banner
+   offers **Compare & pull request** — click it.
+   *No banner?* Click the **Pull requests** tab → **New pull request**.
+2. Check the two branches at the top: **base: `main`** ← **compare: `staging`**.
+   Base is where the code is going; compare is where it is coming from. Getting
+   these backwards is the most common mistake.
+3. Scroll down and read the diff. This is the part that matters — it is exactly
+   what you are proposing to put in front of users.
+4. **Title:** `Promote 0.1.2 to production`
+5. **Description:** optional. *"Version bump validated on staging"* is plenty.
+6. Click **Create pull request**.
+
+### Or from the terminal, with the GitHub CLI
 
 ```bash
 gh pr create --base main --head staging --title "Promote 0.1.2 to production"
 ```
 
-`gh` will then prompt you:
+It then prompts you:
 
-- **Body** — a description. Press `e` to open an editor, or just leave it empty
-  and continue. For this one, something like *"Version bump validated on staging"*
-  is plenty.
-- **What's next?** — choose **Submit**.
+- **Body** — press `e` to open an editor, or leave it empty and continue
+- **What's next?** — choose **Submit**
 
-Or click **Compare & pull request** in the GitHub UI, which does the same thing.
+> `gh` acts as whichever GitHub account it is logged in as, which is not
+> necessarily the one you are using in the browser. Check with `gh auth status`,
+> and switch with `gh auth switch` if it is the wrong one. If `gh` is
+> authenticated as an account without access to the class organization, the
+> command fails even though the browser would work fine.
 
 Watch the checks run on the PR — `test` passes, and both deploy jobs skip, because
 a pull request is not a push to a deploy branch. Nothing deploys from a PR.
