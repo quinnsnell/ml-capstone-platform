@@ -109,6 +109,26 @@ Everything reads the same **roster CSV** with columns `team_name,email,name,gith
 
 Rosters are gitignored except `roster-example.csv` (FERPA — real emails + GitHub usernames must never enter public git history). Keep them on rigel; `scp` from your laptop as needed.
 
+### Optional: the pre-lab readiness survey
+
+Before a lab that expects students to arrive with working laptops, `scripts/prelab-check.py`
+creates a second Canvas survey asking how the prep went:
+
+```bash
+./scripts/prelab-check.py create --draft    # review, then publish
+./scripts/prelab-check.py status            # outcomes, who is stuck, who is silent
+```
+
+`status` groups responses by where people got stuck rather than listing thirty
+free-text answers, so a common failure shows up as a count instead of a pattern
+you have to notice. It also lists who has not reported at all — silence and
+success look identical otherwise.
+
+Several students reporting the *same* failure usually means the instructions are
+wrong, not that thirty people made the same mistake.
+
+---
+
 ### 1. Send GitHub org invitations
 
 Preview first:
