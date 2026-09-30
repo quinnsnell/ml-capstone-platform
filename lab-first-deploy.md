@@ -17,15 +17,67 @@ Budget about 90 minutes. Work in order — each step depends on the one before.
 You should already have, from the pre-lab email:
 
 - [ ] Accepted the **byu-ml-capstone** GitHub organization invitation
-- [ ] Created your repo from the `hello-world-app` template, owned by **byu-ml-capstone**, named `yourname-appname`, with **Include all branches** checked
 - [ ] **Docker Engine 25+** — check with `docker version`
 - [ ] Connected to the **CS VPN** (`cs-vpn.byu.edu` portal, *not* campus `vpn.byu.edu`)
 
-Missing any of those? Fix it first — every later step depends on them.
+Missing any of those? Fix it first — every later step depends on them. In
+particular, you cannot create a repository inside the organization until you have
+accepted the invitation, so step 1 will fail.
 
 ---
 
-## 1. Sign in to Coolify and look around
+## 1. Create your repository from the template
+
+Everyone starts from the same template repo and makes their own copy of it.
+
+If you already did this from the pre-lab email, just run the verification at the
+end of this step and move on.
+
+Go to the **byu-ml-capstone** organization on GitHub, open **hello-world-app**,
+and click the green **Use this template** → **Create a new repository**.
+
+Four things on that screen:
+
+**Owner — change it to `byu-ml-capstone`.** It defaults to your personal account,
+which is wrong. A repo in the wrong place has no Coolify source and cannot deploy,
+and you will not find out until several steps later.
+
+**Repository name — be deliberate.** This name is not throwaway:
+
+- it becomes your app's web address — `alice-hello` → `alice-hello.ml-capstone.cs.byu.edu`
+- it becomes your Coolify project name
+- it sits in a shared class organization that your instructor, your classmates, and later your group will all browse
+
+Use `<yourname>-<appname>`, lowercase, hyphens between words:
+
+| Good | Why |
+|---|---|
+| `asmith-hello` | identifies you, says what it is |
+| `jdoe-sentiment` | still obvious in a list of thirty |
+| `mchen-recommender` | reads fine as a URL |
+
+| Avoid | Why |
+|---|---|
+| `test`, `myapp`, `project1` | meaningless in a list of thirty |
+| `Alice_Hello App` | spaces and capitals make an ugly URL |
+| in-jokes and handles | this is coursework in a shared org, and it ends up in a URL you will share |
+
+Treat it the way you would a repo at work, because that is the habit being built.
+
+**"Include all branches" — check this box.** You need both `main` and `staging`.
+
+**Public or private** — either is fine.
+
+Then click **Create repository from template**.
+
+**Verify before moving on.** On your new repo's page, click the branch dropdown
+above the file list. You should see **both** `main` and `staging`. If you only see
+`main`, you missed the checkbox — delete the repo and redo this step now rather
+than working around it later.
+
+---
+
+## 2. Sign in to Coolify and look around
 
 Open <https://ml-capstone-admin.cs.byu.edu> and **Sign in with GitHub**.
 
@@ -46,7 +98,7 @@ email to use — don't create a second account.
 
 ---
 
-## 2. Clone your repo and switch to staging
+## 3. Clone your repo and switch to staging
 
 Clone **your** repo, not the template:
 
@@ -60,15 +112,15 @@ git checkout staging
 Everything in this lab happens on `staging`. You will promote to `main` at the
 end — that is the point of having two branches.
 
-If `git branch -a` shows only `main`, you missed **Include all branches** when
-creating the repo. Easiest fix is to delete the repo and redo the template step.
+If `git branch -a` shows only `main`, go back to step 1 — the **Include all
+branches** box was missed.
 
 ---
 
-## 3. Start the local build now
+## 4. Start the local build now
 
 The first build pulls images and installs dependencies and takes a few minutes.
-Start it, then keep reading — steps 4 and 5 happen in the browser while this runs.
+Start it, then keep reading — steps 5 and 6 happen in the browser while this runs.
 
 ```bash
 export SERVICE_FQDN_HELLO=http://localhost:8000
@@ -100,7 +152,7 @@ Leave it running or `docker compose down` — either is fine from here on.
 
 ---
 
-## 4. Create a Coolify API token
+## 5. Create a Coolify API token
 
 Terraform needs to authenticate as you.
 
@@ -120,7 +172,7 @@ Then: click the **Coolify** wordmark (top-left) → **Keys & Tokens → API Toke
 
 ---
 
-## 5. Find your server UUID
+## 6. Find your server UUID
 
 Coolify gives **every team its own server record**. They are all named
 `ml-capstone` and all point at the same machine, but each has a different UUID —
@@ -135,7 +187,7 @@ Exactly one server comes back. Copy its `uuid`.
 
 ---
 
-## 6. Fill in your Terraform variables
+## 7. Fill in your Terraform variables
 
 ```bash
 cd terraform
@@ -146,17 +198,17 @@ Open `terraform.tfvars` and set four values:
 
 | Variable | Value |
 |---|---|
-| `coolify_token` | the token from step 4 |
+| `coolify_token` | the token from step 5 |
 | `github_token` | run `gh auth token`, or create a classic PAT with `repo` scope |
 | `repo_name` | just the repo name — `alice-hello`, **not** `byu-ml-capstone/alice-hello` |
-| `coolify_server_uuid` | the UUID from step 5 |
+| `coolify_server_uuid` | the UUID from step 6 |
 
 `terraform.tfvars` holds two live credentials. It is already in `.gitignore`.
 **Never commit it.**
 
 ---
 
-## 7. init, plan, apply
+## 8. init, plan, apply
 
 ```bash
 terraform init        # downloads the providers, verifies them against the lock file
@@ -181,14 +233,14 @@ tracks `staging` and the other `main`.
 
 | Error mentions | Fix |
 |---|---|
-| `coolify_server_uuid is required` | step 5 — you left it blank |
+| `coolify_server_uuid is required` | step 6 — you left it blank |
 | `401` / `Unauthenticated` | token wrong, or pasted with a trailing space |
 | `404` on the application | wrong server UUID — you used another team's |
 | `repo_name should be just the repo name` | you included the `byu-ml-capstone/` prefix |
 
 ---
 
-## 8. See what Terraform created
+## 9. See what Terraform created
 
 **In Coolify** — Projects → **your repo name** (not `hello-world-app`; the
 project is named after your repo). Inside it:
@@ -211,7 +263,7 @@ already references them by exactly these names.
 
 ---
 
-## 9. Set your two domains — the one manual step
+## 10. Set your two domains — the one manual step
 
 Terraform cannot do this. Coolify's API will not accept per-service domains on a
 Docker Compose application, so it stays a UI step and is documented as one.
@@ -240,7 +292,7 @@ variant if Coolify added one. Do **not** click "Generate Domain".
 
 ---
 
-## 10. Make a change and push to staging
+## 11. Make a change and push to staging
 
 Bump the version so you can see your change arrive:
 
@@ -276,7 +328,7 @@ reaches production until you promote it.
 
 ---
 
-## 11. Promote to production
+## 12. Promote to production
 
 ```bash
 gh pr create --base main --head staging --title "Promote 0.1.2 to production"
