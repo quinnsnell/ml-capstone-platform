@@ -7,6 +7,10 @@
 - [Student Setup Guide](student-guide.md)
 - [Lab — Your First Deploy](lab-first-deploy.md)
 
+# For Research Students
+
+- [Using the Classroom LLM](research-students.md)
+
 # Template App
 
 - [Template App README](template-app.md)

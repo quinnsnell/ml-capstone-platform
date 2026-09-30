@@ -83,6 +83,9 @@ ml-capstone-platform/
 | Purpose | URL | Reachable from |
 |---|---|---|
 | Editor endpoint for the classroom LLM | `http://ml-capstone.cs.byu.edu:4000/v1` | VPN |
+
+Research students who only need the LLM — not the deployment platform — have a
+short setup page: [`research-students.md`](research-students.md).
 | GitHub webhook (auto-deploy) | `https://ml-capstone.cs.byu.edu/webhooks/*` | Public internet (via CS IT HAProxy) |
 | Coolify API (deploy trigger from GitHub Actions) | `https://ml-capstone-admin.cs.byu.edu/api/v1/deploy/...` | Public internet, token-gated (via CS IT HAProxy) |
 | Coolify admin UI | `https://ml-capstone-admin.cs.byu.edu` | Publicly resolvable but OAuth-gated (invite-only) |
