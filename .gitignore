@@ -110,3 +110,8 @@ sendsimplemessage.py
 # byu-ml-capstone/hello-world-app. Generated, never edited here.
 docs/src/template-app.md
 docs/src/template-terraform.md
+
+# Filled-in tickets naming students (FERPA — this repo is public). The blank
+# templates in tickets/ ARE tracked; anything with real names or NetIDs goes
+# here and stays local.
+tickets/private/

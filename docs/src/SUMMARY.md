@@ -5,6 +5,7 @@
 # For Students
 
 - [Student Setup Guide](student-guide.md)
+- [Lab — Your First Deploy](lab-first-deploy.md)
 
 # Template App
 

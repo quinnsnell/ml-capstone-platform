@@ -9,6 +9,7 @@ You can use either capability or both. This guide walks you through setting up e
 
 ## Contents
 
+- **[Lab — Your First Deploy](lab-first-deploy.md)** — the condensed step-by-step for lab day; this guide is the reference behind it
 - [Before you start](#before-you-start)
   - [Platform notes — read this if you're on Windows](#platform-notes--read-this-if-youre-on-windows)
 - **Part A — AI coding in your editor**
@@ -467,6 +468,11 @@ Real teams never merge straight into production. Staging exists to:
 This mirrors what you'll do at every serious tech company.
 
 ## Setup: Create your repo, then sign in and create your Coolify Applications
+
+> **Doing this in lab?** [**Lab — Your First Deploy**](lab-first-deploy.md) is the
+> condensed walkthrough — same steps, no digressions, sized to work through in one
+> sitting. Come back here when you want the reasoning, the Coolify-UI alternative,
+> or more detail on a step that bit you.
 
 **Do this once, before writing any code.** ~15 minutes.
 
