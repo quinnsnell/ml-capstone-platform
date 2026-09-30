@@ -481,6 +481,38 @@ a pull request is not a push to a deploy branch. Nothing deploys from a PR.
 > ```
 > then re-apply your version bump, commit, and `git push --force origin staging`.
 
+### Making review mandatory — how teams actually work
+
+Right now nothing stops you merging your own pull request seconds after opening
+it, or pushing straight to `main` and skipping the PR entirely. On a real team
+neither is allowed. The mechanism is **branch protection**:
+
+**Repository → Settings → Branches → Add branch protection rule** (newer repos:
+**Settings → Rules → Rulesets → New ruleset**)
+
+- **Branch name pattern:** `main`
+- ☑ **Require a pull request before merging**
+  - **Require approvals:** `1` — someone else must review it
+- ☑ **Require status checks to pass before merging** → select **`test`**
+- ☑ **Do not allow bypassing the above settings** — otherwise admins skip it
+
+With that on, `main` can only change through a reviewed pull request whose tests
+passed. The CI job you have been watching stops being advisory and becomes the
+thing standing between a broken commit and production.
+
+**Two reasons not to turn it on today:**
+
+1. **You cannot approve your own pull request.** Working alone, requiring an
+   approval locks you out of your own `main` branch.
+2. **GitHub Free does not offer branch protection on private repositories.** If
+   your repo is private — most are — the setting is unavailable until the repo is
+   public or the organization is on a paid plan.
+
+So treat this as something to read now and use later. **When you move to the group
+project, turn it on.** That is the point at which "someone else reviews it" stops
+being a formality and starts catching things — and it is the setting that makes
+the pull request a gate rather than a ceremony.
+
 Merge it. Then watch Actions again: `test` passes, `deploy-prod` runs,
 `deploy-staging` skips. When it finishes:
 
