@@ -382,10 +382,16 @@ APP_VERSION = "0.1.2"
 ```
 
 ```bash
-git add hello/greetings.py
+git status                 # see exactly what you changed
+git add -A                 # stage all of it
 git commit -m "bump version to 0.1.2"
 git push origin staging
 ```
+
+`git add -A` stages everything — files you edited, files you deleted, and files
+you created. `git status` first is the habit worth keeping: `-A` sweeps up new
+files too, and `terraform.tfvars` is only kept out of your commits by a line in
+`.gitignore`. Look before you stage.
 
 **Now watch it, in this order:**
 
