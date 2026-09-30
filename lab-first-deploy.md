@@ -210,8 +210,42 @@ Open `terraform.tfvars` and set four values:
 | `repo_name` | just the repo name — `alice-hello`, **not** `byu-ml-capstone/alice-hello` |
 | `coolify_server_uuid` | the UUID from step 6 |
 
-`terraform.tfvars` holds two live credentials. It is already in `.gitignore`.
-**Never commit it.**
+### Getting your GitHub token
+
+Terraform needs it for two things: reading your repository, and writing the three
+GitHub Actions secrets onto it.
+
+**If you have the GitHub CLI**, this is the whole job:
+
+```bash
+gh auth token
+```
+
+Copy the output — about 40 characters, starting `gho_` or `ghp_`.
+
+**From the GitHub website**, if you don't have `gh`:
+
+1. Sign in to github.com and click your **avatar** (top right) → **Settings**
+2. Scroll to the very bottom of the left sidebar → **Developer settings**
+3. **Personal access tokens** → **Tokens (classic)**
+4. **Generate new token** → **Generate new token (classic)**
+5. **Note:** `terraform-lab`
+6. **Expiration:** pick something that covers the course. If it lapses you can
+   generate another — avoid "No expiration"
+7. **Scopes:** tick the top-level **`repo`** box. That selects its sub-boxes and
+   is all you need
+8. Scroll to the bottom → **Generate token**
+9. **Copy it immediately.** GitHub shows it exactly once. It starts `ghp_`
+
+> Using a **fine-grained** token instead? Give it access to your repo, then under
+> **Repository permissions** set **Secrets → Read and write** (Metadata → Read is
+> added for you). Classic tokens are simpler for this lab.
+
+### Then guard the file
+
+`terraform.tfvars` now holds two live credentials — one that can change your
+Coolify team, one that can act on your GitHub repositories. It is already in
+`.gitignore`. **Never commit it**, and don't paste it into Slack or an issue.
 
 ---
 
