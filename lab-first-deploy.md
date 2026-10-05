@@ -539,6 +539,124 @@ automatic.
 
 ---
 
+## 13. Moving on to your own project
+
+`hello-world-app` is scaffolding. Your real project will have its own services —
+commonly a `frontend`, a `backend`, and a `db`. You can throw away everything in
+`hello/` and `time/` and replace it.
+
+**What you can change freely:** service names, how many services there are, the
+languages, the frameworks, the Dockerfiles, the dependencies, the endpoints. None
+of that is special.
+
+**What the platform requires** is a short list, and every item on it has already
+bitten someone in this class.
+
+### 1. The domain must point at the service that actually serves users
+
+Rename `hello` to `frontend` and Coolify still has the domain attached to a service
+called `hello` — which no longer exists. Traefik then has no route and your URL
+returns `404 page not found`, even though the deploy succeeded and the containers
+are healthy.
+
+Re-attach it, **in both environments**: lab step 10, but pick `frontend` in the
+Service dropdown.
+
+### 2. `${SERVICE_FQDN_<SERVICE>}` must match that service's name
+
+The variable name follows the service, uppercased, with `-` becoming `_`:
+
+| Service | Variable |
+|---|---|
+| `hello` | `${SERVICE_FQDN_HELLO}` |
+| `frontend` | `${SERVICE_FQDN_FRONTEND}` |
+| `web-ui` | `${SERVICE_FQDN_WEB_UI}` |
+
+Referencing it is what makes Coolify generate a route at all. Rename the service
+and forget the variable, and nothing is ever published. Only the public service
+needs one — `backend` and `db` must *not* have one, or Coolify will expose them.
+
+### 3. Every long-running service needs a `healthcheck:`
+
+This is the one that looks like the platform is broken. Coolify judges your
+application by its containers' Docker health. A service with **no** health check
+does not report "fine" — it reports nothing, and an application Coolify cannot
+confirm is healthy gets marked unhealthy and stopped. Typically a couple of hours
+after a deploy that said success, and the cleanup then removes the containers, so
+the logs are gone before you look.
+
+```yaml
+frontend:
+  build: ./frontend
+  expose:
+    - "80"
+  environment:
+    APP_URL: ${SERVICE_FQDN_FRONTEND}
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+    start_period: 30s
+    start_interval: 2s
+    interval: 5m
+    timeout: 5s
+    retries: 3
+  restart: unless-stopped
+```
+
+Use a tool the image actually has — `wget` on Alpine, `curl` on Debian-based,
+`python -c` if it ships Python, `pg_isready` for Postgres. A check that cannot run
+is as bad as no check.
+
+And make it test something real. A health check that returns 200 unconditionally is
+a gate that always opens — it will happily promote a build whose database
+connection is broken.
+
+### 4. `expose:`, never `ports:`
+
+The cluster host is shared by the whole class. `ports: "8000:8000"` claims a host
+port, and only one container on the machine can own it:
+
+```
+Bind for 0.0.0.0:8000 failed: port is already allocated
+```
+
+`expose:` documents the container port without binding it. Traefik reaches your
+container over the internal Docker network. Your local
+`docker-compose.override.yml` is where a host port binding belongs, since that file
+is local-only and Coolify ignores it.
+
+### 5. Keep a real health endpoint on the public service
+
+Something like `/health` that returns 200 when the app can actually work — it can
+reach the database, it can reach the service it depends on. It is what your health
+check tests and therefore what decides whether a deploy reaches users.
+
+### Keep the two branches the same shape
+
+Restructure on `staging`, get it working, *then* promote. If `staging` defines
+`frontend`/`backend`/`db` while `main` still has `hello`/`time`/`db`, your two
+environments are running different applications, and promoting swaps production for
+something that has never been tested in that environment.
+
+### Deploy after you change shape
+
+Renaming a service changes nothing until a deploy runs. And because Traefik bakes
+routing labels in at container start, a domain change needs a deploy too. A pushed
+restructure that has not deployed means what is live is still the old application —
+which is a confusing state to debug, because the repo and the running containers
+disagree.
+
+### Before you push a restructure
+
+- [ ] every service has a `healthcheck:` that uses a tool present in its image
+- [ ] the public service uses `expose:`, not `ports:`
+- [ ] `${SERVICE_FQDN_<SERVICE>}` matches the public service's name
+- [ ] no `SERVICE_FQDN` on internal services
+- [ ] `./smoke-test.sh` (or your own equivalent) passes locally
+- [ ] after deploying: re-attach the domain in Coolify for **both** environments
+- [ ] after that: redeploy, then load both URLs
+
+---
+
 ## When something goes wrong
 
 | Symptom | Most likely cause |
@@ -553,6 +671,7 @@ automatic.
 | Actions red at `test` | your code is broken — nothing deployed, old version still live |
 | Deploy ran but version unchanged | health check failed; Coolify kept the old container |
 | Deployed fine, then died hours later | a service in your compose file has no `healthcheck:` |
+| Restructured, now the URL 404s | the domain is still attached to the old service name — section 13 |
 
 Fuller answers in [`troubleshooting.md`](troubleshooting.md).
 
