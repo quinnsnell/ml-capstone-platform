@@ -60,6 +60,7 @@ ml-capstone-platform/
 │   ├── pin-gpu-host.sh           Freeze/verify a GPU host's kernel + NVIDIA driver pin
 │   ├── canvas-roster.py          Canvas roster + GitHub-username survey -> roster CSV
 │   ├── prelab-check.py           Canvas survey: did the pre-lab setup work? + triage
+│   ├── student-debug.py          Who is stuck, and why (Coolify + containers + their compose)
 │   ├── term-start.sh             Ordered term-start provisioning (roster -> GitHub -> Coolify)
 │   ├── provision-teams.sh         Bulk-create Coolify teams+users+servers from roster CSV (runs on rigel)
 │   ├── verify-provisioning.sh     Post-provision check: GitHub + Coolify state per roster row (runs on rigel)

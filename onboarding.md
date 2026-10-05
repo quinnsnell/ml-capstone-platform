@@ -238,6 +238,41 @@ The instructor does NOT create Applications or Deploy Webhooks. Students do this
 
 ---
 
+## During a lab: seeing who is stuck
+
+`scripts/student-debug.py` reads Coolify, the running containers, and each
+student's `docker-compose.yaml` from GitHub.
+
+```bash
+./scripts/student-debug.py            # progress table for the whole class
+./scripts/student-debug.py oliphant   # everything about one student
+```
+
+With no argument it shows how far each team got — terraform shape, domains,
+deployment count, containers running — and ends with a list of anyone who has
+deployed but has nothing running, which is the signature of a student who is
+genuinely stuck rather than simply not started.
+
+With a name it checks the things that actually go wrong, in the order they bite:
+
+- terraform shape — a project with two environments and two applications; more
+  than two usually means a second `apply` or a hand-made application
+- domains set, and attached to a service that still exists in their compose file
+- deployment history, container health, and a live HTTP request to each URL
+- **every long-running compose service has a `healthcheck:`** — one that reports
+  nothing is treated as unhealthy and stopped hours after a clean deploy
+- `${SERVICE_FQDN_<SERVICE>}` matches the service the domain is on
+- `main` and `staging` define the same services, and what is running matches what
+  the branch now defines
+
+That last pair catches the common mid-restructure state: a student renames the
+public service, pushes it, and the domain still points at the old name. The tool
+says so before their next deploy 404s.
+
+Requires the CS VPN, ssh to the Coolify host, and `gh`.
+
+---
+
 ## Off-boarding a group / student (end of semester)
 
 1. **CS VPN:** if access was granted specifically for this course (rather than an entitlement the student already held as a CS major), tell CS IT to revoke it — same channel used at term start.
