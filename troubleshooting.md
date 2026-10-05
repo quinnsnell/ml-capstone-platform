@@ -151,6 +151,68 @@ That plain-text 404 is Traefik saying *no route exists for this hostname* — it
 
 3. **You are on `https://`.** Student apps are routed on the HTTP entrypoint only, because the `*.cs.byu.edu` wildcard cert covers one level and these hostnames are two levels deep. An HTTPS request finds no matching router and gets a **503 "no available server"** rather than a 404 — so if you are seeing 503 instead, switch to `http://`. Some browsers upgrade silently.
 
+### Deploy succeeded, then the app died a couple of hours later
+
+Symptoms: the deployment log ends in success, the site works briefly, and later the
+URL 404s. In Coolify the resource reads **`exited:unhealthy`**, and `docker ps -a`
+shows no containers at all — so their logs are gone too.
+
+**Most likely cause: a service with no `healthcheck:`.**
+
+Coolify decides whether your application is alive by reading its containers' Docker
+health status. A container with no health check does not report "fine" — it reports
+*nothing*, and a resource Coolify cannot confirm is healthy eventually gets marked
+unhealthy and stopped. Coolify's periodic cleanup then removes the stopped
+containers, taking the logs with them.
+
+Read your own deploy log for the giveaway. Services with a health check announce
+themselves twice:
+
+```
+Container db-xxxx       Started
+Container db-xxxx       Healthy        <- has a healthcheck
+Container frontend-xxxx Started
+                                       <- no "Healthy" line: no healthcheck
+```
+
+**This bites when you restructure the template.** The template ships a health check
+on all three services. Rename `hello` to `frontend`, split it into `frontend` +
+`backend`, or add a service, and it is easy to carry over `expose:`, `restart:` and
+`${SERVICE_FQDN_*}` while leaving the health check behind — the app works locally,
+deploys cleanly, and then quietly dies.
+
+Every long-running service needs one. For an HTTP service:
+
+```yaml
+frontend:
+  build: ./frontend
+  expose:
+    - "80"
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+    start_period: 30s
+    start_interval: 2s
+    interval: 5m
+    timeout: 5s
+    retries: 3
+  restart: unless-stopped
+```
+
+Use whatever the image actually has — `wget` on Alpine, `curl` elsewhere, `python -c`
+if it ships Python, `pg_isready` for Postgres. A check that cannot run is as bad as
+no check.
+
+Make it test something real. A health check that returns 200 unconditionally is a
+gate that always opens, which is worse than useless: it will happily promote a build
+whose database connection is broken.
+
+**While you are in there**, confirm the rest of the rename landed:
+
+- the domain in Coolify is attached to the service you actually renamed to
+- `${SERVICE_FQDN_<SERVICENAME>}` matches that service's name, in caps
+- `main` and `staging` are running the same shape of application — if you rewrote
+  compose on `staging` only, promoting will deploy something different to production
+
 ### App URL returns "Bad Gateway" or Traefik-branded error
 
 Container is running but not reachable from Coolify's proxy. Most common causes:

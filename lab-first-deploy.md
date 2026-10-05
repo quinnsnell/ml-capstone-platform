@@ -399,6 +399,13 @@ files too, and `terraform.tfvars` is only kept out of your commits by a line in
    `deploy-staging` runs and `deploy-prod` is skipped — the branch decides.
 2. **Coolify → your staging Application → Deployments.** Coolify builds a new
    image, starts containers, polls `/health`, then swaps traffic.
+
+> **Later, when you restructure this app:** every long-running service in
+> `docker-compose.yaml` needs a `healthcheck:`. Coolify judges your application by
+> its containers' health, and a service that reports *nothing* is treated as
+> unhealthy rather than as fine — it will deploy cleanly and then be stopped hours
+> later. The template has one on all three services; keep them when you rename or
+> split things. See `troubleshooting.md` if an app dies after a successful deploy.
 3. **Your staging URL:**
 
 ```bash
@@ -545,6 +552,7 @@ automatic.
 | Pushed, but no Actions run | you only changed markdown |
 | Actions red at `test` | your code is broken — nothing deployed, old version still live |
 | Deploy ran but version unchanged | health check failed; Coolify kept the old container |
+| Deployed fine, then died hours later | a service in your compose file has no `healthcheck:` |
 
 Fuller answers in [`troubleshooting.md`](troubleshooting.md).
 
