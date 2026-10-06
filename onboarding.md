@@ -262,6 +262,21 @@ Aiden James Beus                  LIVE              2    4     3   2  finished
 Cameron Kersey                    not started       0    0     0   0
 ```
 
+The `ON STEP` column maps observable state to the lab:
+
+| Step | Inferred from |
+|---|---|
+| `1` | no repo of theirs in the org |
+| `2-8` | repo exists, no Coolify project — somewhere between cloning and `terraform apply` |
+| `10` | project and applications exist, no real domain set |
+| `11` | domains set, never deployed |
+| `12` | staging running, production not |
+| `done` | both environments running |
+
+Repo ownership comes from each repo's direct collaborators, not from matching
+names — students name repos freely (`AtlasGrey001` owns `omega-cameron-repo`), so
+name matching is wrong in both directions.
+
 | Status | Means |
 |---|---|
 | `BROKEN` | deployed, nothing running — the only state that is actually wrong |

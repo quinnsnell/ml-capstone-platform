@@ -107,8 +107,9 @@ def http(url: str) -> str:
 
 
 # ---------------------------------------------------------------- fleet view
-def roster_teams() -> set[str] | None:
-    """Team names belonging to actual students, so demo teams don't pad the counts."""
+def roster() -> dict[str, dict] | None:
+    """team_name -> {name, github_username}, so demo teams don't pad the counts
+    and we can look for each student's repo in the org."""
     import csv, glob, os
     files = [f for f in glob.glob(os.path.join(os.path.dirname(os.path.dirname(
              os.path.abspath(__file__))), "roster-*.csv")) if "example" not in f]
@@ -116,8 +117,46 @@ def roster_teams() -> set[str] | None:
         return None
     newest = max(files, key=os.path.getmtime)
     with open(newest, newline="") as fh:
-        return {r["team_name"].strip() for r in csv.DictReader(fh)
+        return {r["team_name"].strip(): r for r in csv.DictReader(fh)
                 if r.get("team_name") and not r["team_name"].startswith("#")}
+
+
+def repo_owners() -> dict[str, str]:
+    """github login (lowercased) -> one of their repos in the org.
+
+    Uses each repo's direct collaborators rather than matching names against
+    repo names: students name repos freely -- kademiester2003 owns
+    kartchner-demo, JansenNye owns jnye-capstone-project -- so name matching
+    produces both false positives and false negatives.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    r = subprocess.run(["gh", "api", f"/orgs/{ORG}/repos", "--paginate",
+                        "--jq", ".[].name"], capture_output=True, text=True)
+    repos = [x.strip() for x in r.stdout.split("\n") if x.strip()]
+
+    def collaborators(repo):
+        out = subprocess.run(
+            ["gh", "api", f"/repos/{ORG}/{repo}/collaborators?affiliation=direct",
+             "--jq", ".[].login"], capture_output=True, text=True)
+        return repo, [x.strip().lower() for x in out.stdout.split("\n") if x.strip()]
+
+    owners: dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for repo, logins in pool.map(collaborators, repos):
+            for login in logins:
+                owners.setdefault(login, repo)
+    return owners
+
+
+LAB_STEP = {
+    "not started":  "1-8",
+    "no domains":   "10",
+    "not deployed": "11",
+    "staging only": "12",
+    "LIVE":         "done",
+    "BROKEN":       "11",
+    "stuck?":       "11",
+}
 
 
 # Worst first: the point of the table is to show who needs attention.
@@ -161,36 +200,50 @@ def overview(apps, running):
     for a in apps:
         teams.setdefault(a["team"], []).append(a)
 
-    only = roster_teams()
-    if only:
-        extra = {t for t in teams if t not in only}
-        teams = {t: v for t, v in teams.items() if t in only}
+    people = roster()
+    if people:
+        extra = {t for t in teams if t not in people}
+        teams = {t: v for t, v in teams.items() if t in people}
     else:
-        extra = set()
+        people, extra = {}, set()
+
+    # One call, so "not started" can be split into "no repo yet" (step 1) and
+    # "repo exists, terraform has not run" (somewhere in 2-8).
+    # Only worth the API sweep if someone has no Coolify project at all.
+    need = any(not [a for a in v if a["uuid"]] for v in teams.values())
+    owners = repo_owners() if (people and need) else {}
 
     rank = {name: i for i, (name, _, _) in enumerate(STATUS_ORDER)}
     colour = {name: c for name, c, _ in STATUS_ORDER}
     rows = []
     for team in teams:
         st, napps, ndom, dep, up, last = classify(teams[team], running)
-        rows.append((rank[st], team, st, napps, ndom, dep, up, last))
+        step = LAB_STEP.get(st, "?")
+        if st == "not started":
+            gh_user = (people.get(team, {}).get("github_username") or "").lower()
+            step = "2-8" if owners.get(gh_user) else "1"
+        rows.append((rank[st], team, st, step, napps, ndom, dep, up, last))
     rows.sort(key=lambda r: (r[0], r[1]))
 
-    print(f"\n{C_B}{'STUDENT':<34}{'STATUS':<14}{'APPS':>5}{'DOM':>5}"
+    print(f"\n{C_B}{'STUDENT':<32}{'ON STEP':<9}{'STATUS':<14}{'APPS':>5}{'DOM':>5}"
           f"{'DEPL':>6}{'UP':>4}  LAST{C_Z}")
-    print("─" * 82)
+    print("─" * 88)
     last_rank = None
-    for rk, team, st, napps, ndom, dep, up, last in rows:
+    for rk, team, st, step, napps, ndom, dep, up, last in rows:
         if last_rank is not None and rk != last_rank:
             print()
         last_rank = rk
         c = colour[st]
-        name = team.replace("'s Sandbox", "")[:33]
-        print(f"{name:<34}{c}{st:<14}{C_Z}{napps:>5}{ndom:>5}{dep:>6}{up:>4}  {last}")
+        name = team.replace("'s Sandbox", "")[:31]
+        print(f"{name:<32}{step:<9}{c}{st:<14}{C_Z}{napps:>5}{ndom:>5}"
+              f"{dep:>6}{up:>4}  {last}")
 
     counts: dict[str, int] = {}
     for r in rows:
         counts[r[2]] = counts.get(r[2], 0) + 1
+    steps: dict[str, int] = {}
+    for r in rows:
+        steps[r[3]] = steps.get(r[3], 0) + 1
     print("─" * 82)
     print(f"{len(rows)} students")
     for name, c, hint in STATUS_ORDER:
@@ -198,6 +251,18 @@ def overview(apps, running):
             print(f"  {c}{counts[name]:>3} {name:<14}{C_Z}{C_DIM}{hint}{C_Z}")
     if extra:
         print(f"{C_DIM}  (ignored {len(extra)} non-roster team(s): {', '.join(sorted(extra))}){C_Z}")
+
+    order = ["1", "2-8", "10", "11", "12", "done"]
+    label = {"1": "step 1 — no repo in the org yet",
+             "2-8": "steps 2-8 — repo exists, terraform has not run",
+             "10": "step 10 — set your two domains",
+             "11": "step 11 — push to staging",
+             "12": "step 12 — promote to production",
+             "done": "finished the lab"}
+    print(f"\n{C_B}Where the class is{C_Z}")
+    for k in order:
+        if steps.get(k):
+            print(f"  {steps[k]:>3}  {label[k]}")
 
     todo = [r[1] for r in rows if r[2] in ("BROKEN", "stuck?")]
     if todo:
