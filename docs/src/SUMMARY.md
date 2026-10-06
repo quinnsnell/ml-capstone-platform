@@ -6,6 +6,7 @@
 
 - [Student Setup Guide](student-guide.md)
 - [Lab — Your First Deploy](lab-first-deploy.md)
+- [Migrating Your Project](migrating-your-project.md)
 
 # For Research Students
 

@@ -549,6 +549,11 @@ commonly a `frontend`, a `backend`, and a `db`. You can throw away everything in
 languages, the frameworks, the Dockerfiles, the dependencies, the endpoints. None
 of that is special.
 
+> **Migrating an existing project?** [`migrating-your-project.md`](migrating-your-project.md)
+> states these requirements in a form you can hand to Codex or another coding
+> agent along with your repo, so it can do the conversion and verify it. Read the
+> diff before you push — the requirements below are what you are checking it against.
+
 **What the platform requires** is a short list, and every item on it has already
 bitten someone in this class.
 
