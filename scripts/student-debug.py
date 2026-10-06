@@ -191,6 +191,14 @@ def compose_services(text: str) -> dict[str, dict]:
             continue
         if not cur:
             continue
+        # Strip comments before looking for anything. The template explains
+        # ${SERVICE_FQDN_*} in prose inside the file, and those mentions would
+        # otherwise be read as real references -- including one for `time`
+        # sitting above the `time:` key, which got attributed to the previous
+        # service and made every unmodified template look misconfigured.
+        line = re.sub(r"(^|\s)#.*$", "", line)
+        if not line.strip():
+            continue
         if re.match(r"^    healthcheck:", line):
             svcs[cur]["healthcheck"] = True
         elif re.match(r"^    restart:", line):
@@ -200,7 +208,7 @@ def compose_services(text: str) -> dict[str, dict]:
         elif re.match(r"^    ports:", line):
             svcs[cur]["ports"] = True
         fq = re.search(r"\$\{SERVICE_FQDN_([A-Z0-9_]+)\}", line)
-        if fq:
+        if fq and not svcs[cur]["fqdn"]:
             svcs[cur]["fqdn"] = fq.group(1)
     return svcs
 

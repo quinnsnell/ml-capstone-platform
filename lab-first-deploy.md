@@ -219,7 +219,25 @@ Exactly one server comes back. Copy its `uuid`.
 ```bash
 cd terraform
 cp terraform.tfvars.example terraform.tfvars
+ls -la terraform.tfvars          # this is the file you edit
 ```
+
+> **Edit `terraform.tfvars`, not `terraform.tfvars.example`.** The names differ by
+> one word and your editor will happily open whichever you clicked last. Two things
+> go wrong if you edit the example:
+>
+> - Terraform does not read it, so your values are ignored. You get
+>   `401 Bad credentials` from GitHub or `Unauthenticated` from Coolify, and the
+>   token looks fine when you test it by hand — because the token *is* fine.
+> - `terraform.tfvars.example` is **tracked by git**. `terraform.tfvars` is
+>   gitignored precisely because it holds live credentials. Put real tokens in the
+>   example and your next commit publishes them.
+>
+> If you have already done it: copy the example to `terraform.tfvars`, then
+> `git checkout terraform/terraform.tfvars.example` to restore the placeholders.
+> Check with `git diff` that the tracked file is back to `REPLACE_ME`, and if you
+> already committed or pushed it, **rotate both tokens** — removing a secret in a
+> later commit does not un-publish it.
 
 Open `terraform.tfvars` and set four values:
 
@@ -295,7 +313,7 @@ tracks `staging` and the other `main`.
 | Error mentions | Fix |
 |---|---|
 | `coolify_server_uuid is required` | step 6 — you left it blank |
-| `401` / `Unauthenticated` | token wrong, or pasted with a trailing space |
+| `401` / `Unauthenticated` | token wrong, pasted with a trailing space, or you edited `terraform.tfvars.example` by mistake |
 | `404` on the application | wrong server UUID — you used another team's |
 | `repo_name should be just the repo name` | you included the `byu-ml-capstone/` prefix |
 
@@ -667,7 +685,7 @@ disagree.
 | Symptom | Most likely cause |
 |---|---|
 | Coolify: "Registration is disabled" | GitHub email doesn't match your roster row |
-| `terraform plan` 401 | token wrong or has trailing whitespace |
+| `terraform plan` 401 | token wrong, trailing whitespace, or you edited `terraform.tfvars.example` instead of `terraform.tfvars` |
 | `terraform plan` 404 on application | wrong server UUID — you used another team's |
 | Your URL: `404 page not found` | nothing deployed yet, or domain set after deploy — hit **Redeploy** |
 | Your URL: `503 no available server` | you used `https://` — student apps are HTTP only |

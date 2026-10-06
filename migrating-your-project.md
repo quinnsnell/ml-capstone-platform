@@ -258,6 +258,11 @@ what the services are called.
 - Do not remove the `test` job from `ci.yml`, or the `needs:`/`if:` conditions
 - Do not commit secrets. `terraform/terraform.tfvars` holds live credentials and is
   gitignored; keep it that way
+- Do not write real values into `terraform/terraform.tfvars.example`. That file **is
+  tracked by git** and must keep its `REPLACE_ME` placeholders. Real values belong
+  only in `terraform.tfvars`. If you find credentials in the example file, move them
+  to `terraform.tfvars`, restore the placeholders, and tell the human to rotate the
+  tokens if it was ever committed
 - Do not set the deployed domain in `docker-compose.yaml` — a human does that in
   Coolify's UI, per service
 - Do not assume `localhost` reaches another container (R5)
@@ -269,6 +274,10 @@ what the services are called.
 Run these and report the results. Do not claim success without them.
 
 ```bash
+# 0. no credentials in tracked files
+grep -nE 'ghp_|gho_|REPLACE_ME' terraform/terraform.tfvars.example   # expect only REPLACE_ME
+git status --porcelain terraform/                                    # expect terraform.tfvars absent (gitignored)
+
 # 1. the compose file is valid and has no host port bindings
 SERVICE_FQDN_<PUBLIC>=http://localhost:<port> docker compose config >/dev/null && echo "compose OK"
 grep -n "ports:" docker-compose.yaml && echo "FAIL: ports: in the deployed compose file"
