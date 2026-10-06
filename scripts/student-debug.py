@@ -107,50 +107,103 @@ def http(url: str) -> str:
 
 
 # ---------------------------------------------------------------- fleet view
+def roster_teams() -> set[str] | None:
+    """Team names belonging to actual students, so demo teams don't pad the counts."""
+    import csv, glob, os
+    files = [f for f in glob.glob(os.path.join(os.path.dirname(os.path.dirname(
+             os.path.abspath(__file__))), "roster-*.csv")) if "example" not in f]
+    if not files:
+        return None
+    newest = max(files, key=os.path.getmtime)
+    with open(newest, newline="") as fh:
+        return {r["team_name"].strip() for r in csv.DictReader(fh)
+                if r.get("team_name") and not r["team_name"].startswith("#")}
+
+
+# Worst first: the point of the table is to show who needs attention.
+STATUS_ORDER = [
+    ("BROKEN",        C_BAD,  "deployed, nothing running"),
+    ("stuck?",        C_BAD,  "deploy failed"),
+    ("no domains",    C_WARN, "terraform done, step 10 not done"),
+    ("not deployed",  C_WARN, "configured, never pushed"),
+    ("staging only",  C_DIM,  "not promoted to production yet"),
+    ("LIVE",          C_OK,   "both environments running"),
+    ("not started",   C_DIM,  ""),
+]
+
+
+def classify(apps_for_team, running):
+    rows = [a for a in apps_for_team if a["uuid"]]
+    doms = [d for r in rows for d in real_domains(r["domains"])]
+    deploys = sum(int(r["ndeploys"] or 0) for r in rows)
+    up = sum(1 for r in rows if r["uuid"] in running)
+    last = max((r["last"] for r in rows if r["last"]), default="")
+
+    if not rows:
+        st = "not started"
+    elif deploys and not up:
+        st = "BROKEN"
+    elif last == "failed":
+        st = "stuck?"
+    elif not deploys and not doms:
+        st = "no domains"
+    elif not deploys:
+        st = "not deployed"
+    elif up >= 2:
+        st = "LIVE"
+    else:
+        st = "staging only"
+    return st, len(rows), len(doms), deploys, up, last
+
+
 def overview(apps, running):
     teams: dict[str, list[dict]] = {}
     for a in apps:
         teams.setdefault(a["team"], []).append(a)
 
-    print(f"\n{C_B}{'STUDENT':<34} {'TERRAFORM':<10} {'DOMAINS':<8} "
-          f"{'DEPLOYS':<8} {'UP':<4} LAST{C_Z}")
-    print("-" * 86)
-    tally = {"not started": 0, "partial": 0, "deployed": 0, "live": 0}
-    for team in sorted(teams):
-        rows = [r for r in teams[team] if r["uuid"]]
-        doms = [d for r in rows for d in real_domains(r["domains"])]
-        deploys = sum(int(r["ndeploys"] or 0) for r in rows)
-        up = sum(1 for r in rows if r["uuid"] in running)
-        last = max((r["last"] for r in rows if r["last"]), default="")
+    only = roster_teams()
+    if only:
+        extra = {t for t in teams if t not in only}
+        teams = {t: v for t, v in teams.items() if t in only}
+    else:
+        extra = set()
 
-        if len(rows) >= 2:
-            tf, col = "complete", C_OK
-        elif rows:
-            tf, col = "partial", C_WARN
-            tally["partial"] += 1
-        else:
-            tf, col = "-", C_DIM
-            tally["not started"] += 1
-        if deploys:
-            tally["deployed"] += 1
-        if up:
-            tally["live"] += 1
+    rank = {name: i for i, (name, _, _) in enumerate(STATUS_ORDER)}
+    colour = {name: c for name, c, _ in STATUS_ORDER}
+    rows = []
+    for team in teams:
+        st, napps, ndom, dep, up, last = classify(teams[team], running)
+        rows.append((rank[st], team, st, napps, ndom, dep, up, last))
+    rows.sort(key=lambda r: (r[0], r[1]))
 
-        flag = C_BAD if (deploys and not up) else ""
-        print(f"{team[:33]:<34} {col}{tf:<10}{C_Z} {len(doms):<8} "
-              f"{deploys:<8} {flag}{up:<4}{C_Z} {last}")
+    print(f"\n{C_B}{'STUDENT':<34}{'STATUS':<14}{'APPS':>5}{'DOM':>5}"
+          f"{'DEPL':>6}{'UP':>4}  LAST{C_Z}")
+    print("─" * 82)
+    last_rank = None
+    for rk, team, st, napps, ndom, dep, up, last in rows:
+        if last_rank is not None and rk != last_rank:
+            print()
+        last_rank = rk
+        c = colour[st]
+        name = team.replace("'s Sandbox", "")[:33]
+        print(f"{name:<34}{c}{st:<14}{C_Z}{napps:>5}{ndom:>5}{dep:>6}{up:>4}  {last}")
 
-    print(f"\n  {len(teams)} teams · {tally['not started']} not started · "
-          f"{tally['partial']} partial · {tally['deployed']} have deployed · "
-          f"{tally['live']} running now")
-    stuck = [t for t in sorted(teams)
-             if sum(int(r['ndeploys'] or 0) for r in teams[t] if r['uuid'])
-             and not any(r["uuid"] in running for r in teams[t] if r["uuid"])]
-    if stuck:
-        print(f"\n{C_BAD}  Deployed but nothing running — look at these first:{C_Z}")
-        for t in stuck:
-            print(f"    {t}")
-        print(f"{C_DIM}    ./scripts/student-debug.py <name>{C_Z}")
+    counts: dict[str, int] = {}
+    for r in rows:
+        counts[r[2]] = counts.get(r[2], 0) + 1
+    print("─" * 82)
+    print(f"{len(rows)} students")
+    for name, c, hint in STATUS_ORDER:
+        if counts.get(name):
+            print(f"  {c}{counts[name]:>3} {name:<14}{C_Z}{C_DIM}{hint}{C_Z}")
+    if extra:
+        print(f"{C_DIM}  (ignored {len(extra)} non-roster team(s): {', '.join(sorted(extra))}){C_Z}")
+
+    todo = [r[1] for r in rows if r[2] in ("BROKEN", "stuck?")]
+    if todo:
+        print(f"\n{C_BAD}Needs help now:{C_Z}")
+        for t in todo:
+            print(f"  {t}   ->  ./scripts/student-debug.py '{t.split()[0]}'")
 
 
 # --------------------------------------------------------------- deep dive

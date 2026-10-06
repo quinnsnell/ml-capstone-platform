@@ -248,10 +248,34 @@ student's `docker-compose.yaml` from GitHub.
 ./scripts/student-debug.py oliphant   # everything about one student
 ```
 
-With no argument it shows how far each team got — terraform shape, domains,
-deployment count, containers running — and ends with a list of anyone who has
-deployed but has nothing running, which is the signature of a student who is
-genuinely stuck rather than simply not started.
+With no argument it prints a status table, grouped worst-first, and ends with the
+students who need attention now:
+
+```
+STUDENT                           STATUS         APPS  DOM  DEPL  UP  LAST
+Roger Alessandro Cifuentes        BROKEN            3    1     8   0  finished
+
+Adam Leishman                     no domains        2    0     0   0
+Ashley Slade                      not deployed      2    4     0   0
+Joseph Dahlke                     staging only      2    2     1   1  finished
+Aiden James Beus                  LIVE              2    4     3   2  finished
+Cameron Kersey                    not started       0    0     0   0
+```
+
+| Status | Means |
+|---|---|
+| `BROKEN` | deployed, nothing running — the only state that is actually wrong |
+| `stuck?` | last deployment failed |
+| `no domains` | terraform done, step 10 not started |
+| `not deployed` | configured, never pushed |
+| `staging only` | correct at step 11; they have not promoted yet |
+| `LIVE` | both environments running |
+| `not started` | no Coolify project |
+
+`APPS` should be 2. More means a repeat `terraform apply` or an application made by
+hand, which is worth clearing before debugging anything else. Non-roster teams
+(demos, your own) are filtered out using the newest `roster-*.csv`, so the counts
+are the real class.
 
 With a name it checks the things that actually go wrong, in the order they bite:
 
