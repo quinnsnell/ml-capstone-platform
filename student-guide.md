@@ -24,7 +24,7 @@ You can use either capability or both. This guide walks you through setting up e
   - [Section 1: Build your first deployable app](#section-1-build-your-first-deployable-app) — grow hello-world into a sentiment classifier
   - [Section 2: Test it locally](#section-2-test-it-locally)
   - [Section 3: Add tests](#section-3-add-tests)
-  - [Section 4: Make `/health` do the integration test's job](#section-4-make-health-do-the-integration-tests-job)
+  - [Section 4: Make the deploy gate as strict as you want](#section-4-make-the-deploy-gate-as-strict-as-you-want)
   - [Section 5: GitHub Actions — the 3-job pipeline](#section-5-github-actions--the-3-job-pipeline)
   - [Section 6: Your testing strategy — the three tiers](#section-6-your-testing-strategy--the-three-tiers)
   - [Section 7: Making your deploys fast (when they get slow)](#section-7-making-your-deploys-fast-when-they-get-slow) — the two-Dockerfile pattern
@@ -1332,79 +1332,65 @@ git checkout staging
 # You'll make all the changes on staging, test them, then merge to main.
 ```
 
-### 1b. Replace the code with a sentiment classifier
+### 1b. Where each piece goes
 
-You can delete `frontend/greetings.py`, `frontend/main.py`, and `frontend/tests/test_api.py` from the template — you'll replace them entirely with what's below. Keep `frontend/Dockerfile`, `frontend/requirements.txt`, `frontend/conftest.py`, and the repo-root orchestration files (`docker-compose.yaml`, `docker-compose.override.yml`, `.github/workflows/ci.yml`, `smoke-test.sh`). Those stay the same shape; only the code inside `frontend/` changes.
+You are replacing the template's demo code, not its shape. Both services keep
+their roles:
 
-> **A note on where this code belongs.** This section builds the classifier as a
-> single service, inside `frontend/`, to keep the focus on the LLM call and the
-> CI pipeline. That is a teaching simplification. In the architecture the
-> template actually ships — and the one your capstone project should use — model
-> inference is application logic and belongs in **`backend`**, with `frontend`
-> proxying to it exactly the way `/notes` does: a method on
-> `frontend/backend_client.py`, a thin route in `frontend/main.py`, and the real
-> work behind the internal network.
->
-> The reason is the same one that keeps SQL out of the frontend: your API key is
-> a credential. Put the LLM call in `backend` and the service exposed to the
-> internet never holds it. When you move from this walkthrough to your own
-> project, that is the shape to build — follow the `/notes` call path in the
-> template and copy it.
+| | Gets deleted | Gets written | Why there |
+|---|---|---|---|
+| `backend/` | `notes_dao.py`, `migrations/`, `main.py`, `tests/` | `sentiment.py`, `main.py`, `tests/` | The LLM call *and* `LITELLM_API_KEY` live here. Internal-only, so the key is never in the service the internet can reach |
+| `frontend/` | `greetings.py`, `main.py`, `tests/` | `main.py`, `backend_client.py` (edit), `tests/` | Public API. Takes requests, validates them, forwards to `backend`. Holds no credentials |
 
-You can also delete the `backend/` service entirely if your app genuinely has no
-logic or data behind it — remove the `backend:` service and `frontend.depends_on`
-from `docker-compose.yaml`, and drop the `/time` endpoint and its tests. Most
-projects should keep it, and the `db` service with it.
+Keep both `Dockerfile`s, both `requirements.txt`, both `conftest.py`, and the
+repo-root orchestration files (`docker-compose.yaml`,
+`docker-compose.override.yml`, `.github/workflows/ci.yml`, `smoke-test.sh`).
 
-### 1c. Write `frontend/main.py`
+**Why the inference goes in `backend` and not `frontend`.** It is the same reason
+the template keeps SQL out of the frontend: `LITELLM_API_KEY` is a credential.
+Put the LLM call behind the internal network and the public service never holds
+it — so a bug, a dependency vulnerability, or a debug endpoint you forget to
+remove cannot leak a key it does not have. You are swapping one kind of backend
+work (SQL) for another (model inference). The structure does not change at all,
+which is the point of having a structure.
 
-A FastAPI service with four endpoints:
+You can also drop the `db` service if your app genuinely stores nothing. Keep it
+if you plan to log predictions — which [Section 8](#section-8-the-day-to-day-updatetestprdeploy-workflow)
+assumes you eventually will.
 
-- `GET /ready` — cheap "am I alive?" — no dependencies exercised.
-- `GET /gpu` — introspects the container's GPU visibility (helps you verify Coolify's GPU config actually attached one).
-- `GET /health` — deep check; Coolify polls this after each deploy and rolls back if it's not 200.
-- `POST /analyze` — the real feature; classifies text via the classroom LLM.
+### 1c. Write `backend/sentiment.py` — the boundary object
+
+This file replaces `notes_dao.py` and plays exactly the same role: it owns one
+outward boundary so that `main.py` does not. `NotesDAO` hid SQL; `SentimentModel`
+hides the LLM — the HTTP call, the prompt, the flaky JSON parsing.
 
 ```python
-"""Small sentiment-classifier via the classroom LiteLLM.
+"""Sentiment classification via the classroom LiteLLM endpoint.
 
-GET  /ready    -> { "ready": true }                    # cheap liveness
-GET  /gpu      -> { device info }                       # GPU introspection
-GET  /health   -> { "ok": true, "litellm": "<url>" }    # deep health (extended in Section 4)
-POST /analyze  { "text": "..." }
-  -> { "text", "sentiment": positive|negative|neutral, "confidence", "reasoning" }
+Same role `notes_dao.py` played for Postgres: everything about talking to the
+outside world lives here, so routes in main.py stay thin. Three payoffs, the
+same three the DAO had:
 
-Config via environment variables (never hardcode):
-  LITELLM_URL      default http://ml-capstone.cs.byu.edu:4000/v1
-  LITELLM_API_KEY  default sk-noauth
-  MODEL            default classroom-chat
+  1. Routes read like a contract. `main.py` says `model.classify(text)` and
+     never mentions a prompt, a header, or a JSON repair.
+  2. Tests patch one method instead of mocking httpx's request/response stack.
+  3. Swapping the provider is a one-file change. Move from LiteLLM to a local
+     transformers pipeline and main.py does not change.
+
+Config comes from environment variables — never hardcode an endpoint or a key.
 """
+
 import json
 import os
 import re
-from typing import Literal
 
 import httpx
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 
-LITELLM_URL = os.environ.get("LITELLM_URL", "http://ml-capstone.cs.byu.edu:4000/v1").rstrip("/")
+LITELLM_URL = os.environ.get(
+    "LITELLM_URL", "http://ml-capstone.cs.byu.edu:4000/v1"
+).rstrip("/")
 LITELLM_API_KEY = os.environ.get("LITELLM_API_KEY", "sk-noauth")
 MODEL = os.environ.get("MODEL", "classroom-chat")
-
-app = FastAPI(title="Sentiment via LiteLLM")
-
-
-class AnalyzeRequest(BaseModel):
-    text: str
-
-
-class AnalyzeResponse(BaseModel):
-    text: str
-    sentiment: Literal["positive", "negative", "neutral"]
-    confidence: float
-    reasoning: str
-
 
 SYSTEM_PROMPT = (
     "You classify the sentiment of user-provided text. "
@@ -1415,36 +1401,147 @@ SYSTEM_PROMPT = (
 )
 
 
-def _extract_json(content: str) -> dict:
-    content = content.strip()
-    if content.startswith("```"):
-        content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content, flags=re.MULTILINE)
-    m = re.search(r"\{.*\}", content, flags=re.DOTALL)
-    if not m:
-        raise ValueError(f"no JSON in: {content[:200]}")
-    return json.loads(m.group(0))
+class ModelError(RuntimeError):
+    """The model could not be reached, or returned something unusable.
+
+    One exception type for every failure mode, so the route in main.py has one
+    `except` clause instead of a pile of httpx- and json-specific cases.
+    """
+
+
+class SentimentModel:
+    """Wraps the LLM. The only place prompts and HTTP live."""
+
+    def __init__(self, url: str = LITELLM_URL, api_key: str = LITELLM_API_KEY,
+                 model: str = MODEL, timeout: float = 30.0):
+        self.url, self.api_key, self.model, self.timeout = url, api_key, model, timeout
+
+    # -- the one place LLM failures become ModelError ------------------------
+
+    def _chat(self, messages: list[dict], max_tokens: int) -> str:
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                r = client.post(
+                    f"{self.url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    json={"model": self.model, "messages": messages,
+                          "max_tokens": max_tokens, "temperature": 0.1},
+                )
+        except httpx.RequestError as e:
+            # Never reached the endpoint: DNS, connection refused, timeout.
+            # On this network that almost always means the VPN is down.
+            raise ModelError(f"LLM unreachable: {e}") from e
+        if r.status_code != 200:
+            raise ModelError(f"LLM returned {r.status_code}: {r.text[:300]}")
+        try:
+            return r.json()["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, ValueError) as e:
+            raise ModelError(f"malformed LLM response: {r.text[:300]}") from e
+
+    @staticmethod
+    def _extract_json(content: str) -> dict:
+        """Models wrap JSON in prose and code fences. Dig it out."""
+        content = content.strip()
+        if content.startswith("```"):
+            content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content,
+                             flags=re.MULTILINE)
+        m = re.search(r"\{.*\}", content, flags=re.DOTALL)
+        if not m:
+            raise ModelError(f"no JSON in model output: {content[:200]}")
+        try:
+            return json.loads(m.group(0))
+        except json.JSONDecodeError as e:
+            raise ModelError(f"bad JSON from model: {content[:200]}") from e
+
+    # -- what main.py actually calls -----------------------------------------
+
+    def classify(self, text: str) -> dict:
+        """-> {"sentiment", "confidence", "reasoning"}. Raises ModelError."""
+        content = self._chat(
+            [{"role": "system", "content": SYSTEM_PROMPT},
+             {"role": "user", "content": text}],
+            max_tokens=200,
+        )
+        parsed = self._extract_json(content)
+        if parsed.get("sentiment") not in ("positive", "negative", "neutral"):
+            raise ModelError(f"unexpected sentiment: {parsed.get('sentiment')!r}")
+        return {
+            "sentiment": parsed["sentiment"],
+            "confidence": float(parsed.get("confidence", 0.0)),
+            "reasoning": parsed.get("reasoning", ""),
+        }
+
+    def probe(self) -> None:
+        """Cheapest possible real call. For /ready. Raises ModelError."""
+        self._chat([{"role": "user", "content": "ping"}], max_tokens=5)
+```
+
+Notice what this bought you. Every ugly part of talking to an LLM — the auth
+header, the retry-worthy network errors, models that wrap JSON in code fences,
+models that invent a fourth sentiment label — is contained in one file, behind
+two public methods and one exception type.
+
+### 1d. Write `backend/main.py` — thin routes
+
+```python
+"""Internal service: sentiment inference. Holds the model credential.
+
+Nothing outside the Compose stack can reach this. `frontend` calls it at
+http://backend:8001 and is the only thing that does.
+"""
+
+import logging
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+from sentiment import LITELLM_URL, MODEL, ModelError, SentimentModel
+
+APP_VERSION = "0.2.0"
+
+log = logging.getLogger("uvicorn.error")
+model = SentimentModel()
+
+app = FastAPI(title="sentiment-backend", version=APP_VERSION)
+
+
+class AnalyzeRequest(BaseModel):
+    text: str
+
+
+@app.get("/health")
+def health():
+    """Liveness only. Deliberately does NOT call the LLM.
+
+    `frontend` waits on this via depends_on: service_healthy, and the container
+    HEALTHCHECK polls it. A real LLM call here would mean the VPN dropping for
+    thirty seconds could kill a container that is working fine.
+    """
+    return {"ok": True, "version": APP_VERSION}
 
 
 @app.get("/ready")
 def ready():
-    """Cheap liveness check. Proves the Python process is up and accepting HTTP.
+    """Readiness — makes one real, tiny LLM call. Allowed to fail.
 
-    Deliberately does NOT touch the LLM, GPU, or any I/O. Use this from external
-    monitors that just want "is the container alive" without incurring a real
-    LLM call every 30 seconds.
+    This is the honest answer to "can this service do its job". It costs a
+    handful of tokens, so poll it from monitoring, not from a loop.
     """
-    return {"ready": True}
+    try:
+        model.probe()
+    except ModelError as e:
+        raise HTTPException(503, f"model not reachable: {e}") from e
+    return {"ok": True, "litellm": LITELLM_URL, "model": MODEL}
 
 
 @app.get("/gpu")
 def gpu():
-    """GPU introspection — reports what CUDA devices this container can see.
+    """GPU introspection — what CUDA devices this container can see.
 
-    This one is a debugging tool for YOU. When Coolify's Advanced-tab GPU
-    config is right, `cuda_available` is true and `devices` lists the A6000(s)
-    your container was granted. If `cuda_available` is false but you expect a
-    GPU, the container isn't seeing one — check Coolify's Advanced → GPU
-    settings (Setup Steps 5–6) and that torch was installed with CUDA support.
+    A debugging tool for you. If `cuda_available` is false but you expect a GPU,
+    check Coolify's Advanced → GPU settings and that torch was installed with
+    CUDA support. `import torch` is inside the function on purpose: if torch is
+    not installed, this returns valid JSON saying so instead of crashing startup.
     """
     info = {"torch_installed": False, "cuda_available": False, "devices": []}
     try:
@@ -1465,57 +1562,127 @@ def gpu():
                 for i in range(torch.cuda.device_count())
             ]
     except ImportError:
-        pass  # torch not installed — that's fine for a pure-LLM app
+        pass  # torch not installed — fine for a pure-LLM app
     return info
+
+
+@app.post("/analyze")
+def analyze(req: AnalyzeRequest):
+    """The real work. One line of it, because sentiment.py holds the rest."""
+    try:
+        result = model.classify(req.text)
+    except ModelError as e:
+        log.warning("classify failed: %s", e)
+        raise HTTPException(502, str(e)) from e
+    return {"text": req.text, **result}
+```
+
+### 1e. Teach the client to call it
+
+`frontend/backend_client.py` already exists and already has the `_request`
+plumbing. Add one method and delete the notes ones you no longer need:
+
+```python
+    def analyze(self, text: str) -> dict:
+        return self._request("POST", "/analyze", json={"text": text})
+```
+
+That is the whole change. The client knows the backend has an `/analyze` route
+that takes `{"text": ...}` — and nothing about prompts, models, or API keys.
+
+### 1f. Write `frontend/main.py` — the public API
+
+```python
+"""Public service: the only one Traefik routes to.
+
+Holds no model credential and makes no LLM calls. It validates input and asks
+`backend`, which is the only service that can reach the model.
+"""
+
+import os
+from typing import Literal
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+from backend_client import BackendClient, BackendError
+
+APP_VERSION = "0.2.0"
+BACKEND_URL = os.environ.get("BACKEND_URL", "http://backend:8001")
+
+backend = BackendClient(BACKEND_URL)
+
+app = FastAPI(title="Sentiment API", version=APP_VERSION)
+
+
+class AnalyzeRequest(BaseModel):
+    text: str
+
+
+class AnalyzeResponse(BaseModel):
+    text: str
+    sentiment: Literal["positive", "negative", "neutral"]
+    confidence: float
+    reasoning: str
 
 
 @app.get("/health")
 def health():
-    """Deep health check. Coolify polls this after every deploy.
+    """Liveness only — does not call the backend. This is the deploy gate."""
+    return {"ok": True, "version": APP_VERSION}
 
-    Currently shallow — just reports config. In Section 4 you'll extend this
-    to actually call the LLM so a broken LLM path fails the deploy instead of
-    shipping a container that returns 500 on every /analyze.
-    """
-    return {"ok": True, "litellm": LITELLM_URL, "model": MODEL}
+
+@app.get("/ready")
+def ready():
+    """Readiness — the whole chain, frontend through backend to the model."""
+    try:
+        return {"ok": True, "frontend": APP_VERSION, "backend": backend.ready()}
+    except BackendError as e:
+        raise HTTPException(503, f"backend not ready: {e}") from e
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 def analyze(req: AnalyzeRequest):
-    with httpx.Client(timeout=30.0) as client:
-        r = client.post(
-            f"{LITELLM_URL}/chat/completions",
-            headers={"Authorization": f"Bearer {LITELLM_API_KEY}"},
-            json={
-                "model": MODEL,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": req.text},
-                ],
-                "max_tokens": 200,
-                "temperature": 0.1,
-            },
-        )
-    if r.status_code != 200:
-        raise HTTPException(502, f"LiteLLM {r.status_code}: {r.text[:400]}")
-    content = r.json()["choices"][0]["message"]["content"]
-    parsed = _extract_json(content)
-    return AnalyzeResponse(
-        text=req.text,
-        sentiment=parsed["sentiment"],
-        confidence=float(parsed.get("confidence", 0.0)),
-        reasoning=parsed.get("reasoning", ""),
-    )
+    try:
+        return backend.analyze(req.text)
+    except BackendError as e:
+        # A 4xx means the backend is telling us something about the request, so
+        # pass it through. Anything else is a dependency failure: 503.
+        if e.status is not None and 400 <= e.status < 500:
+            raise HTTPException(e.status, str(e)) from e
+        raise HTTPException(503, str(e)) from e
 ```
 
-Key patterns to notice:
+Add the matching one-liner to `backend_client.py` so `/ready` works:
 
-- **Three health-ish endpoints, three purposes.** `/ready` = "process is up" (cheap, safe to hit every second). `/gpu` = "what hardware did I get?" (debugging). `/health` = "is the whole thing actually working?" (Coolify's deploy gate — Section 4 makes it deep). Separating them lets each caller pay only for what it needs.
-- **`os.environ.get("LITELLM_URL", "default")`** — reads the LLM URL from an env var. Never hardcode it. Different envs (local, prod) supply different values.
-- **`app.run(host="0.0.0.0")`** happens inside the container via uvicorn (see Dockerfile) — binding to loopback would make the container unreachable from Coolify's proxy.
-- **`import torch` inside the endpoint, not at module top.** If you haven't installed torch yet (Section 1 doesn't — it's optional), `/gpu` still returns a valid JSON response saying `torch_installed: false` instead of crashing app startup. Deferred imports keep optional dependencies optional.
+```python
+    def ready(self) -> dict:
+        return self._request("GET", "/ready")
+```
 
-### 1d. Write `requirements.txt`
+**Two `AnalyzeRequest` models, one per service, is deliberate.** Each service
+validates its own input, so the backend stays safe no matter what calls it, and
+the public API can change shape later — rename a field, add a length limit,
+accept a batch — without the backend caring.
+
+Key patterns to notice across both files:
+
+- **`/health` is cheap, `/ready` is honest.** The container HEALTHCHECK and
+  Coolify's deploy gate watch `/health`, so it must not depend on the VPN being
+  up at that instant. `/ready` makes a real call and is allowed to fail. Section
+  4 covers how to deliberately make the gate stricter.
+- **Config via `os.environ.get(...)`, never hardcoded.** Local and deployed
+  supply different values for the same variable.
+- **Bind `0.0.0.0`, not `127.0.0.1`** — done by the uvicorn command in each
+  Dockerfile. Loopback would make the container unreachable.
+- **One file per boundary.** `sentiment.py` owns the LLM, `backend_client.py`
+  owns the hop between services. Both `main.py` files are short as a result, and
+  each test suite mocks one object.
+
+### 1g. Requirements and Dockerfiles
+
+`frontend/requirements.txt` — already correct from the template, no database
+driver, `httpx` for the client:
 
 ```
 fastapi==0.115.6
@@ -1524,32 +1691,67 @@ httpx==0.28.1
 pydantic==2.10.5
 ```
 
-### 1e. Write the `Dockerfile`
+`backend/requirements.txt` — drop `psycopg` if you dropped the `db` service, add
+`httpx` for the LLM call:
+
+```
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1
+pydantic==2.10.5
+```
+
+Both Dockerfiles come from the template and need no changes beyond what is
+already there — `frontend/Dockerfile` on 8000, `backend/Dockerfile` on 8001.
+Remove `COPY migrations/ ./migrations/` from the backend's if you dropped the
+database:
 
 ```dockerfile
 FROM python:3.12-slim
-
 WORKDIR /app
-
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-EXPOSE 8000
-
+COPY *.py ./
+EXPOSE 8001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()" || exit 1
-
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health').read()" || exit 1
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001"]
 ```
 
-Two Dockerfile gotchas that trip most students:
+Two gotchas that trip most students:
 
-1. **Must listen on `0.0.0.0`, not `127.0.0.1`.** Inside a container, binding to loopback means nothing outside the container can reach you. That's `--host 0.0.0.0` in the uvicorn command.
-2. **`EXPOSE 8000`** matches the port Coolify's proxy expects. Your instructor's Application config maps their internal port to yours; the convention is `:8000`.
+1. **Must listen on `0.0.0.0`.** Inside a container, binding to loopback means
+   nothing outside can reach you. That is `--host 0.0.0.0`.
+2. **`EXPOSE` must match the port uvicorn uses** — 8000 for the frontend, 8001
+   for the backend, and the HEALTHCHECK URL has to match too. A healthcheck
+   pointed at the wrong port fails forever and the container is killed.
 
-### 1f. Write a `.gitignore`
+### 1h. Wire the environment variables in compose
+
+The credential moves with the code. In `docker-compose.yaml`, the LLM settings
+go on **`backend`**, and `frontend` keeps only the backend's address:
+
+```yaml
+services:
+  frontend:
+    environment:
+      - APP_URL=${SERVICE_FQDN_FRONTEND}
+      - BACKEND_URL=http://backend:8001        # an address, not a secret
+
+  backend:
+    environment:
+      - LITELLM_URL=${LITELLM_URL:-http://ml-capstone.cs.byu.edu:4000/v1}
+      - LITELLM_API_KEY=${LITELLM_API_KEY:-sk-noauth}
+      - MODEL=${MODEL:-classroom-chat}
+```
+
+The `${VAR:-default}` form reads from your root `.env` locally and from the
+Application's Environment Variables in Coolify, falling back to the class
+defaults if neither sets it.
+
+### 1i. `.gitignore` and `.env`
+
+The template's `.gitignore` already covers this. Confirm it has:
 
 ```gitignore
 __pycache__/
@@ -1561,9 +1763,8 @@ venv/
 .pytest_cache/
 ```
 
-### 1g. Add a `.env` for local development
-
-Create a file called `.env` with:
+Create a `.env` at the **repo root** — not inside either service directory, so
+Compose picks it up for the whole project:
 
 ```
 LITELLM_URL=http://ml-capstone.cs.byu.edu:4000/v1
@@ -1571,21 +1772,25 @@ LITELLM_API_KEY=sk-noauth
 MODEL=classroom-chat
 ```
 
-Note the `.env` is **git-ignored** — never commit it, even though this file doesn't have real secrets. It's the pattern; real secrets should also live in `.env` files or your platform's secret store.
+`.env` is git-ignored. Never commit it, even though these particular values are
+not secret — it is the habit that matters. When you add a real key, it goes here
+and in Coolify's Environment Variables, nowhere else.
 
 ## Section 2: Test it locally
 
-Before adding tests or CI, make sure the app actually runs on your machine. Put your `.env` at the **repo root** (not inside `frontend/`) — Docker Compose auto-picks up `.env` from the project root and the variables become available to all services.
-
 ```bash
-docker compose up -d --build   # builds frontend/ (and any other services), starts detached
+docker compose up -d --build    # starts backend, then frontend
 ```
 
-In another terminal (or after a `sleep 3`):
+Everything is reached through the **frontend** on port 8000. The backend has no
+host port at all:
 
 ```bash
 curl http://127.0.0.1:8000/health
-# {"ok":true,"litellm":"http://ml-capstone.cs.byu.edu:4000/v1","model":"classroom-chat"}
+# {"ok":true,"version":"0.2.0"}
+
+curl http://127.0.0.1:8000/ready
+# {"ok":true,"frontend":"0.2.0","backend":{"ok":true,"litellm":"...","model":"classroom-chat"}}
 
 curl -X POST http://127.0.0.1:8000/analyze \
   -H 'Content-Type: application/json' \
@@ -1593,113 +1798,211 @@ curl -X POST http://127.0.0.1:8000/analyze \
 # {"text":"...","sentiment":"positive","confidence":0.98,"reasoning":"..."}
 ```
 
-You must be on VPN for the container to reach the LLM. Stop with `docker compose down` when done.
+You must be on the **CS VPN** for the backend to reach the LLM. If `/health`
+returns 200 but `/ready` returns 503 and `/analyze` returns 502, that is the
+symptom — the stack is fine, the VPN is not. That distinction is exactly why the
+two endpoints are separate.
+
+Two checks worth running once, because they prove the structure rather than the
+feature:
+
+```bash
+# The backend is not reachable from your laptop. Only the frontend is.
+curl -m 5 http://127.0.0.1:8001/analyze        # connection refused
+
+# The credential is not in the public service.
+docker compose exec frontend env | grep LITELLM     # no output
+docker compose exec backend  env | grep LITELLM     # the config
+```
+
+Stop with `docker compose down` when you are done.
 
 ## Section 3: Add tests
 
-Create `frontend/tests/test_health.py`:
+Two suites, one per service, each mocking at its own boundary — the same split
+the template ships with.
+
+**`backend/tests/test_api.py`** mocks `SentimentModel`, so no LLM and no VPN:
 
 ```python
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
+
+import main
+from sentiment import ModelError
 from main import app
 
 client = TestClient(app)
 
 
-def test_health_returns_ok():
-    r = client.get("/health")
+def test_health_is_cheap_and_does_not_call_the_model():
+    with patch.object(main.model, "probe") as probe, \
+         patch.object(main.model, "classify") as classify:
+        r = client.get("/health")
     assert r.status_code == 200
-    body = r.json()
-    assert body["ok"] is True
-    assert "litellm" in body
+    probe.assert_not_called()
+    classify.assert_not_called()
+
+
+def test_analyze_returns_model_output():
+    fake = {"sentiment": "positive", "confidence": 0.97, "reasoning": "praise"}
+    with patch.object(main.model, "classify", return_value=fake) as m:
+        r = client.post("/analyze", json={"text": "fantastic!"})
+    assert r.status_code == 200
+    assert r.json() == {"text": "fantastic!", **fake}
+    m.assert_called_once_with("fantastic!")
 
 
 def test_analyze_requires_text():
     r = client.post("/analyze", json={})
-    assert r.status_code == 422  # pydantic validation error
+    assert r.status_code == 422          # pydantic rejects it before our code
+
+
+def test_analyze_502_when_model_fails():
+    with patch.object(main.model, "classify",
+                      side_effect=ModelError("LLM unreachable: timeout")):
+        r = client.post("/analyze", json={"text": "x"})
+    assert r.status_code == 502
+
+
+def test_ready_503_when_model_unreachable():
+    with patch.object(main.model, "probe",
+                      side_effect=ModelError("LLM unreachable: timeout")):
+        r = client.get("/ready")
+    assert r.status_code == 503
 ```
 
-`from main import app` works because `frontend/conftest.py` marks `frontend/` as pytest's rootdir — pytest auto-adds it to `sys.path`, so `main.py` is importable directly.
-
-Add pytest to `frontend/requirements.txt`:
-
-```
-pytest==8.3.4
-```
-
-Run locally from the `frontend/` directory:
-
-```bash
-cd frontend
-python -m pip install -r requirements.txt
-pytest -v
-cd ..
-```
-
-Two tests pass. Note that we don't hit the real LLM in unit tests — that would fail in CI where there's no VPN. Real integration tests belong in a separate suite that only runs against a deployed instance.
-
-## Section 4: Make `/health` do the integration test's job
-
-Unit tests (Section 3) verify functions in isolation. Real integration tests — hitting the live deployed URL with real requests — are what catch bugs that only show up against real infrastructure (networking, env vars, actual LLM). Those normally run in CI against staging.
-
-**In the full setup we're aiming for**, a self-hosted GitHub Actions runner inside the CS VPN runs pytest against `http://<your-group>-staging.ml-capstone.cs.byu.edu` on every staging deploy. That runner doesn't exist yet — it's on the roadmap.
-
-**Right now**, Coolify's built-in health check fills the role. Coolify polls your `/health` endpoint after every deploy. If it doesn't return 2xx within N attempts, Coolify marks the deploy as failed and rolls back. You can make that health check as thorough as you want — including verifying the LLM path end-to-end.
-
-### Extend `/health` to exercise the real dependencies
-
-Update `frontend/main.py` — replace the simple `/health` with a thorough version that actually calls the LLM:
+**`frontend/tests/test_api.py`** mocks `BackendClient`, so no HTTP at all:
 
 ```python
-@app.get("/health")
-def health():
-    """Deep health check — verifies LLM dependency actually works end-to-end.
+from unittest.mock import patch
 
-    Returns 200 only if:
-      - the app is up
-      - the LiteLLM endpoint is reachable
-      - a small chat request succeeds
-      - the response has expected structure
-    """
-    try:
-        with httpx.Client(timeout=10.0) as client:
-            r = client.post(
-                f"{LITELLM_URL}/chat/completions",
-                headers={"Authorization": f"Bearer {LITELLM_API_KEY}"},
-                json={
-                    "model": MODEL,
-                    "messages": [{"role": "user", "content": "healthcheck"}],
-                    "max_tokens": 5,
-                },
-            )
-        r.raise_for_status()
-        r.json()["choices"][0]["message"]["content"]   # will KeyError if malformed
-    except Exception as e:
-        raise HTTPException(503, f"health check failed: {e}") from e
+from fastapi.testclient import TestClient
 
-    return {
-        "ok": True,
-        "litellm": LITELLM_URL,
-        "model": MODEL,
-    }
+import main
+from backend_client import BackendError
+from main import app
+
+client = TestClient(app)
+
+
+def test_health_does_not_call_the_backend():
+    with patch.object(main.backend, "ready") as m:
+        r = client.get("/health")
+    assert r.status_code == 200
+    m.assert_not_called()
+
+
+def test_analyze_passes_text_through():
+    fake = {"text": "fantastic!", "sentiment": "positive",
+            "confidence": 0.97, "reasoning": "praise"}
+    with patch.object(main.backend, "analyze", return_value=fake) as m:
+        r = client.post("/analyze", json={"text": "fantastic!"})
+    assert r.status_code == 200
+    assert r.json() == fake
+    m.assert_called_once_with("fantastic!")
+
+
+def test_analyze_503_when_backend_down():
+    with patch.object(main.backend, "analyze",
+                      side_effect=BackendError("backend unreachable: refused")):
+        r = client.post("/analyze", json={"text": "x"})
+    assert r.status_code == 503
 ```
 
-Now when Coolify polls `/health`:
-- If your container is up but LiteLLM is unreachable → `/health` returns 503 → Coolify marks deploy unhealthy
-- If LiteLLM responds but with garbage → same
-- Only if the full chain works does deploy succeed
+`from main import app` works because each service has a `conftest.py` that makes
+its own directory pytest's rootdir, so `main.py` is importable directly.
 
-This is a valid engineering pattern — treating your health check as a live integration test. Trade-off: `/health` now costs a small LLM call per poll (Coolify defaults to every ~30s), so keep the token budget tiny.
+Add `pytest` to neither `requirements.txt` — it is a dev tool, and CI installs
+it separately. Run both suites:
 
-### Why keep `/ready` separate
+```bash
+cd backend  && python -m pytest tests/ -v && cd ..
+cd frontend && python -m pytest tests/ -v && cd ..
+```
 
-You already have `/ready` from Section 1 — cheap, no I/O, just proves the process is up. Now that `/health` costs a real LLM call per poll, the separation matters:
+**No test here hits the real LLM**, deliberately: CI runs on GitHub's machines,
+which have no VPN, so a test that needed the model would fail every time. Real
+integration tests belong in a separate suite that runs against a deployed URL —
+which is Section 4.
 
-- **`/ready`** — external liveness monitors ("is the container alive?") can hit this every second without generating LLM load.
-- **`/health`** — Coolify's deploy gate ("does the full chain actually work?") gets called only after each deploy, so the LLM cost is one-time-per-release, not per-request.
+Notice the shape of `test_analyze_passes_text_through`. It asserts on the *call*,
+not just the response. That is what catches a frontend that quietly drops a field
+when you add one later — exactly the failure the step 11 migration lab walked
+through.
 
-Some Coolify configurations let you point liveness at `/ready` and the deep readiness check at `/health` explicitly; the default single-endpoint mode uses `/health`, which is what the template's Dockerfile HEALTHCHECK does.
+## Section 4: Make the deploy gate as strict as you want
 
+Unit tests verify functions in isolation. Integration tests — real requests
+against the live deployed URL — catch what only breaks against real
+infrastructure: a missing environment variable, a wrong hostname, an LLM that is
+reachable from your laptop but not from the container.
+
+**In the full setup we are aiming for**, a self-hosted GitHub Actions runner
+inside the CS VPN runs pytest against
+`http://<your-repo>-staging.ml-capstone.cs.byu.edu` on every staging deploy. That
+runner does not exist yet — it is on the roadmap.
+
+**Right now**, the container health check is the closest thing you have, and you
+get to choose how strict it is. Coolify polls whatever the HEALTHCHECK names; a
+non-2xx answer means the deploy is marked unhealthy and the old container keeps
+serving.
+
+### The choice: which endpoint does the HEALTHCHECK poll?
+
+You wrote two endpoints in Section 1. Pointing the check at one or the other is a
+real engineering decision with a real trade-off.
+
+**Default — point it at `/health`** (what the template ships):
+
+```dockerfile
+HEALTHCHECK ... CMD python -c "...urlopen('http://127.0.0.1:8001/health')..."
+```
+
+A deploy succeeds as long as the process starts. Fast, costs nothing, and never
+fails for a reason outside your code. The downside is honest: a build whose
+`LITELLM_API_KEY` is wrong deploys successfully and then returns 502 on every
+`/analyze`.
+
+**Strict — point it at `/ready`**:
+
+```dockerfile
+HEALTHCHECK --interval=5m --timeout=15s --start-period=60s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/ready').read()" || exit 1
+```
+
+Now a broken model path fails the deploy instead of shipping. A bad key, an
+unreachable endpoint, a model that no longer exists — all caught before traffic
+moves. This is a legitimate and common pattern: the health check *is* a live
+integration test.
+
+Three things you must do if you choose strict, and they are the reason this is a
+choice rather than a recommendation:
+
+1. **Raise `start_period`.** The container has to come up and reach the LLM
+   before the first check counts. 60s, not 10s.
+2. **Lengthen `interval`.** The check now costs real tokens every time it runs,
+   forever — not just at deploy. 30 seconds is 2,880 LLM calls per container per
+   day. Five minutes is 288. Keep `max_tokens` tiny, which `probe()` already does.
+3. **Accept that a dependency outage restarts your containers.** If the VPN or
+   the LLM goes down for long enough, a running, previously-healthy container
+   gets marked unhealthy and killed. Your app was fine; its dependency was not.
+
+That third point is the whole reason `/health` exists as a separate, cheap
+endpoint. Decide which failure you would rather debug: a bad build that deployed,
+or a good build that got rolled back because something else was briefly down.
+
+**A reasonable middle ground**, and what we would suggest for the capstone: keep
+the HEALTHCHECK on `/health`, and hit `/ready` yourself right after a deploy —
+one line in `smoke-test.sh`, which already takes a URL:
+
+```bash
+./smoke-test.sh http://<your-repo>-staging.ml-capstone.cs.byu.edu
+```
+
+You get the strict check's information without letting an outage elsewhere
+restart your containers.
 ## Section 5: GitHub Actions — the 3-job pipeline
 
 **Your repo already has `.github/workflows/ci.yml`** — you inherited it from the `hello-world-app` template in Setup Step 1. This section walks through what it does so you understand the mechanics (and can modify it later). The current file looks like this:
@@ -1859,13 +2162,13 @@ Fast feedback loop: green here means you're safe to push. Roughly 30 seconds aft
 
 Nice for a quick sanity check right after a Coolify deploy: "did the endpoints actually come up on the live URL?" Same script, so what passes locally should pass remotely; if it doesn't, you've found a bug that only appears in the Coolify environment.
 
-**Limits:** doesn't test against real infrastructure — the `/health` and `/analyze` endpoints hit the classroom LiteLLM, but everything is running locally on your laptop. Bugs that only appear in the Coolify environment (env vars, GPU allocation, networking) can slip through — running the same script with a remote URL after the deploy catches most of those.
+**Limits:** doesn't test against real infrastructure — `/ready` and `/analyze` reach the classroom LiteLLM, but everything is running locally on your laptop. Bugs that only appear in the Coolify environment (env vars, GPU allocation, networking) can slip through — running the same script with a remote URL after the deploy catches most of those.
 
-### Tier 2 — Deploy gate (Coolify's `/health` check)
+### Tier 2 — Deploy gate (the container health check)
 
-Not something you run — it runs automatically as part of every deploy. After Coolify builds and starts your container, it polls your `/health` endpoint. If `/health` returns 503, Coolify marks the deploy unhealthy and keeps serving from the old container. If it returns 200, the new container takes over.
+Not something you run — it runs automatically as part of every deploy. After Coolify builds and starts your container, it polls whatever endpoint the HEALTHCHECK names. A non-2xx answer means Coolify marks the deploy unhealthy and keeps serving from the old container; a 200 means the new container takes over.
 
-The trick you learned in Section 4: make `/health` do a real deep check. It calls the LLM, runs a sample through the local model, verifies both succeed. That's an actual integration test running inside the deploy pipeline — the deploy literally cannot succeed if the app can't reach its real dependencies.
+The decision you made in Section 4 is which endpoint that is. Pointed at `/health` it only proves the process started. Pointed at `/ready` it becomes a real integration test inside the deploy pipeline — the deploy cannot succeed unless the app actually reaches its dependencies — at the cost of a dependency outage being able to restart healthy containers.
 
 **Limits:** it's a single scripted check. It doesn't try 50 different inputs, look at response shapes across a variety of cases, or verify edge cases. It answers "does this container basically work?" — not "does this container behave correctly on the range of inputs my users will send?"
 
@@ -2143,7 +2446,7 @@ On GitHub: **Compare & pull request** → set base to `staging`. When the PR ope
 Merging your PR into `staging` pushes to `staging`, triggering:
 
 - `test` (again, on merge commit)
-- `deploy-staging` (Coolify deploys to your staging URL, gated by the deep `/health` check — see Section 6, Tier 2)
+- `deploy-staging` (Coolify deploys to your staging URL, gated by the container health check — see Section 6, Tier 2)
 
 Coolify's health check is the Tier 2 gate — a bad container never becomes the live staging container. But that's just a scripted check; it doesn't cover the full range of inputs your users will send.
 
@@ -2637,7 +2940,7 @@ Named volumes live on rigel's disk. If rigel dies, they're gone unless someone h
 - **Tests failed** — GitHub Actions tab shows red. Look at logs, fix, re-push.
 - **`COOLIFY_DEPLOY_WEBHOOK_STAGING` or `_PROD` secret missing or wrong** — Actions log will show a curl error.
 - **You pushed to a feature branch, not `staging` or `main`** — deploy jobs only run on those branches. Feature branches only run `test`.
-- **Deploy fires but Coolify marks it failed** — the `/health` endpoint is returning non-2xx. Check Coolify's deploy log; probably an LLM/env/dependency issue that only shows up in the deployed environment. Fix locally, push, retry.
+- **Deploy fires but Coolify marks it failed** — the endpoint your HEALTHCHECK polls is returning non-2xx. Check Coolify's deploy log; probably an LLM/env/dependency issue that only shows up in the deployed environment. Fix locally, push, retry.
 - **Coolify deploy log says `Bind for 0.0.0.0:8000 failed: port is already allocated`** — you're on the Docker Compose build pack and your `docker-compose.yaml` has `ports: "8000:8000"`. That binds host port 8000, and the shared cluster server only lets ONE container own each host port. Replace `ports:` with `expose: - "8000"` — Coolify + Traefik route the domain to your container over the internal `coolify` Docker network based on the Port field in Coolify's Application settings, so no host port binding is needed. (The `hello-world-app` template's `docker-compose.yaml` shows the correct pattern.)
 
 ## Deploy runs but app is unreachable
