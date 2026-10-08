@@ -13,26 +13,110 @@
 # the modal.
 #
 # Usage:
-#   scripts/delete-coolify-project.sh <project-uuid>          # show the plan
+#   scripts/delete-coolify-project.sh <student>               # list their projects
+#   scripts/delete-coolify-project.sh --list                  # every duplicate in the class
+#   scripts/delete-coolify-project.sh <project-uuid>          # show the delete plan
 #   scripts/delete-coolify-project.sh <project-uuid> --yes    # do it
+#
+# Pick by uuid, because duplicates can share every other field. The listing
+# shows what you need to choose on:
+#
+#   - Same project NAME twice: they ran `terraform apply` against a lost or
+#     discarded state file. Their state now tracks the newer one, so keep that
+#     and delete the older -- but note the older is usually the one carrying
+#     the real domains, so they must redo lab step 10 afterwards.
+#   - DIFFERENT names: they changed project_name in terraform.tfvars, so their
+#     state tracks the new name and will recreate it if you delete it. Ask the
+#     student which name they want before removing either.
+#   - A name that is clearly hand-typed ("Product management tool") is one they
+#     made in the UI; terraform does not know about it and deleting it is safe.
 set -euo pipefail
 
 COOLIFY_HOST="${COOLIFY_HOST:-rigel}"
 BACKUP_DIR="${BACKUP_DIR:-$HOME/coolify-backups}"
 PSQL="docker exec -i coolify-db psql -U coolify -d coolify -At -F'~'"
 
-uuid="${1:-}"
+arg="${1:-}"
 confirm="${2:-}"
-if [[ -z "$uuid" ]]; then
-    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
-    exit 1
-fi
-if [[ ! "$uuid" =~ ^[a-z0-9]{20,30}$ ]]; then
-    echo "error: '$uuid' does not look like a Coolify project uuid" >&2
+if [[ -z "$arg" ]]; then
+    sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
     exit 1
 fi
 
 run() { ssh -o BatchMode=yes "$COOLIFY_HOST" "$1"; }
+
+# SQL string literals: double any apostrophe. Team names carry them
+# ("Ashley Slade's Sandbox") and an unescaped one is a syntax error.
+sqlq() { printf '%s' "${1//\'/\'\'}"; }
+
+# ---------------------------------------------------------------- listing mode
+# Anything that is not a uuid is a search term, so the uuid never has to be
+# known in advance -- which is the whole problem when two projects share a name.
+list_projects() {
+    local where="$1" header="$2"
+    echo "$header"
+    echo
+    local rows
+    rows=$(run "$PSQL -c \"
+      SELECT t.name, p.uuid, p.name, p.created_at,
+             count(DISTINCT a.id),
+             string_agg(DISTINCT a.status, ' ' ORDER BY a.status),
+             COALESCE(string_agg(DISTINCT a.docker_compose_domains, ' '), '')
+      FROM projects p JOIN teams t ON t.id=p.team_id
+      LEFT JOIN environments e ON e.project_id=p.id
+      LEFT JOIN applications a ON a.environment_id=e.id
+      WHERE $where
+      GROUP BY t.name, p.uuid, p.name, p.created_at
+      ORDER BY t.name, p.created_at;\"")
+    if [[ -z "$rows" ]]; then
+        echo "  no projects matched"
+        return 1
+    fi
+
+    local team last_team="" puuid pname created napps statuses blob doms
+    while IFS='~' read -r team puuid pname created napps statuses blob; do
+        [[ -z "$puuid" ]] && continue
+        if [[ "$team" != "$last_team" ]]; then
+            [[ -n "$last_team" ]] && echo
+            echo "${team/\'s Sandbox/}"
+            last_team="$team"
+        fi
+        # Only hostnames the student chose: Coolify's own are sslip.io or
+        # <service>-<uuid>.<host IP>, and neither means anything was configured.
+        doms=$(grep -oE '[A-Za-z0-9.-]+\.ml-capstone\.cs\.byu\.edu' <<<"$blob" \
+               | sort -u | paste -sd' ' - || true)
+        printf '  %-26s %-9s %-14s created %s\n' \
+               "$puuid" "${napps} apps" "${statuses:--}" "${created%%.*}"
+        printf '      name    %s\n' "$pname"
+        printf '      domains %s\n' "${doms:-(none -- never configured)}"
+    done <<<"$rows"
+    echo
+}
+
+if [[ "$arg" == "--list" || "$arg" == "-l" ]]; then
+    # Every team holding more than one project: that is the whole duplicate set.
+    list_projects "p.team_id IN (
+        SELECT team_id FROM projects GROUP BY team_id HAVING count(*) > 1)" \
+      "Teams with more than one project — these are the duplicates:" || exit 1
+    echo "Pick the uuid to remove, then:"
+    echo "  $0 <project-uuid>         # dry run"
+    echo "  $0 <project-uuid> --yes   # delete"
+    exit 0
+fi
+
+if [[ ! "$arg" =~ ^[a-z0-9]{20,30}$ ]]; then
+    # A student name, team name or project name. List and stop -- deleting
+    # needs a uuid, because duplicates share every other field.
+    term=$(sqlq "$arg")
+    list_projects "t.name ILIKE '%${term}%' OR p.name ILIKE '%${term}%'" \
+      "Projects matching '$arg':" || exit 1
+    echo "Pick the uuid to remove, then:"
+    echo "  $0 <project-uuid>         # dry run"
+    echo "  $0 <project-uuid> --yes   # delete"
+    exit 0
+fi
+
+uuid="$arg"
 
 # --- the project must exist, and we report whose it is before touching it
 row=$(run "$PSQL -c \"
