@@ -492,13 +492,19 @@ def compose_services(text: str) -> dict[str, dict]:
 # hashes, so identical content gives an identical SHA in any repo, with no need
 # for shared history (template-generated repos have none).
 TEMPLATE_REPO = "hello-world-app"
-STOCK = {"hello", "time", "db"}
+
+# Both generations of the template. The services were renamed partway through
+# the term -- `hello`/`time` became `frontend`/`backend` to match the names used
+# in lecture -- so students who created their repo earlier still carry the old
+# names and are no less "stock" for it.
+STOCK = {"hello", "time", "db", "frontend", "backend"}
 SUFFIX = "'s Sandbox"
 
 # Files the lab itself tells them to touch, or that carry no project signal.
 # Everything else that is new or modified is their own work.
 LAB_NOISE = {
-    "README.md", ".gitignore", "hello/greetings.py",
+    "README.md", ".gitignore",
+    "hello/greetings.py", "frontend/greetings.py",   # the step-11 version bump
     "terraform/README.md", "terraform/terraform.tfvars.example",
 }
 
@@ -519,8 +525,15 @@ def repo_tree(repo: str, ref: str) -> dict[str, str] | None:
     return out or None
 
 
+# The services were renamed partway through the term, so there are two template
+# generations in the wild. Comparing an old-template repo against the new tree
+# counts every renamed path as both deleted and new, which reads as a student
+# who has rewritten everything. So compare against both and keep the better fit.
+TEMPLATE_REFS = ("main", "8a9a33c")   # current, and the last pre-rename commit
+
+
 def divergence(tmpl: dict, tree: dict | None) -> dict | None:
-    """How far this tree has moved from the template."""
+    """How far this tree has moved from one template generation."""
     if not tree:
         return None
     mod = {p for p in tmpl if p in tree and tree[p] != tmpl[p]}
@@ -528,6 +541,17 @@ def divergence(tmpl: dict, tree: dict | None) -> dict | None:
     gone = {p for p in tmpl if p not in tree}
     return {"files": len(tree), "mod": mod, "new": new, "gone": gone,
             "own": (new | mod) - LAB_NOISE}
+
+
+def best_divergence(tmpls: list[dict], tree: dict | None) -> dict | None:
+    """Divergence against whichever template generation this repo came from.
+
+    "Fewest files of their own" is the right tiebreak: the generation a repo was
+    created from is the one it looks most like, and picking the other would
+    attribute the rename itself to the student.
+    """
+    cands = [d for d in (divergence(t, tree) for t in tmpls) if d]
+    return min(cands, key=lambda d: len(d["own"])) if cands else None
 
 
 def compose_services_of(repo: str, ref: str) -> dict | None:
@@ -556,42 +580,43 @@ def gather(repos: list[str]) -> dict[str, dict]:
     return out
 
 
-# rank, label, colour -- least progress first
+# rank, label, colour -- least progress first.
+#
+# There used to be an "in place" / "own svcs" split, on the theory that renaming
+# the compose services signalled progress. The template rename killed that:
+# `frontend`/`backend` are now the stock names, so a student who renames away
+# from them is deviating, not advancing. Whether their own code is in the repo is
+# the only question left, and the FILES column says how much.
 MIGRATION = [
     (0, "no repo",  C_DIM),
     (1, "template", C_DIM),
-    (2, "in place", C_WARN),
-    (3, "own svcs", C_OK),
+    (2, "own code", C_OK),
 ]
 MIG_RANK = {lab: r for r, lab, _ in MIGRATION}
 MIG_COLOUR = {lab: c for _, lab, c in MIGRATION}
 
 
-def migration_state(tmpl: dict, data: dict | None) -> tuple[str, dict]:
+def migration_state(tmpls: list[dict], data: dict | None) -> tuple[str, dict]:
     """(label, per-branch divergence) for one student's repo.
 
-    "in place" is the case service names miss entirely: their own code is in
-    the repo, but the compose services are still the template's names.
+    Service names are deliberately not consulted: students convert the template
+    in place and keep its service names, which is now the recommended shape.
     """
     if not data:
         return "no repo", {}
-    div = {ref: divergence(tmpl, data.get(ref, {}).get("tree"))
+    div = {ref: best_divergence(tmpls, data.get(ref, {}).get("tree"))
            for ref in ("main", "staging")}
     if all(v is None for v in div.values()):
         return "no repo", div
-    own = any(v and v["own"] for v in div.values())
-    if not own:
+    if not any(v and v["own"] for v in div.values()):
         return "template", div
-    names = set()
-    for ref in ("main", "staging"):
-        names |= set(data.get(ref, {}).get("svcs") or ())
-    return ("own svcs" if names - STOCK else "in place"), div
+    return "own code", div
 
 
 BRANCH_OF = {"production": "main", "staging": "staging"}
 
 
-def project_verdict(apps_for_team, tmpl, data, div, running, colliding, codes):
+def project_verdict(apps_for_team, data, div, running, colliding, codes):
     """(working, [blockers]) -- is their own project actually serving users?
 
     Deliberately ends at HTTP: a compose file can look wrong and still route
@@ -664,8 +689,8 @@ def project_view(apps, running):
             seen.append(owners[gh])
         cands[team] = seen
 
-    tmpl = repo_tree(TEMPLATE_REPO, "main")
-    if not tmpl:
+    tmpls = [t for t in (repo_tree(TEMPLATE_REPO, r) for r in TEMPLATE_REFS) if t]
+    if not tmpls:
         print(f"Could not read the template tree from {ORG}/{TEMPLATE_REPO}.")
         return
     data = gather(sorted({c for v in cands.values() for c in v}))
@@ -684,13 +709,12 @@ def project_view(apps, running):
     for team, apps_for_team in teams.items():
         best, best_state, best_div = "", "no repo", {}
         for c in cands[team] or [""]:
-            st, dv = migration_state(tmpl, data.get(c))
+            st, dv = migration_state(tmpls, data.get(c))
             if MIG_RANK[st] >= MIG_RANK[best_state]:
                 best, best_state, best_div = c, st, dv
         lab, napps, *_ = classify(apps_for_team, running)
         working, blockers = project_verdict(
-            apps_for_team, tmpl, data.get(best), best_div, running,
-            colliding, codes)
+            apps_for_team, data.get(best), best_div, running, colliding, codes)
         stg = best_div.get("staging") or best_div.get("main")
         rows.append({
             "team": team, "repo": best, "mig": best_state, "div": best_div,
@@ -708,7 +732,7 @@ def project_view(apps, running):
                              r["team"]))
 
     good = [r for r in rows if r["working"]]
-    started = [r for r in rows if r["mig"] in ("in place", "own svcs")]
+    started = [r for r in rows if r["mig"] == "own code"]
     print(f"\n{C_B}Step 13 — their own project{C_Z}   "
           f"{C_OK}{len(good)} working{C_Z}{C_DIM} · {C_Z}"
           f"{C_WARN}{len(started)} started{C_Z}{C_DIM} · "

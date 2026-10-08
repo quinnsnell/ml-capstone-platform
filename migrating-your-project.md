@@ -30,7 +30,9 @@ docker-compose.yaml          what Coolify deploys
 docker-compose.override.yml  local-only additions; Coolify ignores this file
 terraform/                   creates the Coolify project, environments, applications
 smoke-test.sh                local + remote endpoint check
-hello/  time/                the template's example services — replace these
+frontend/                    public service — replace the code, keep the role
+backend/                     internal service, owns the database — same
+
 ```
 
 **Preserve `.github/workflows/ci.yml` and `terraform/`.** They are already wired to
@@ -126,23 +128,36 @@ then stops hammering the service:
 
 *Violation:* clean deploy, dead application hours later, no logs left.
 
-### R4 — The public service must serve a health endpoint that tests real dependencies
+### R4 — Two endpoints: a cheap `/health` and an honest `/ready`
 
-Add one if the project lacks it. It must return a 2xx only when the service can
-actually do its job — reach its database, reach the services it depends on.
+Add both if the project lacks them. They answer different questions and Coolify
+only watches the first.
 
 ```python
-@app.get("/health")
+@app.get("/health")              # liveness. Touches NOTHING downstream.
 def health():
-    try:
-        db.execute("SELECT 1")
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"db unreachable: {e}")
     return {"ok": True, "version": APP_VERSION}
+
+
+@app.get("/ready")               # readiness. Allowed to fail.
+def ready():
+    try:
+        backend.health()         # or db.execute("SELECT 1") in the data service
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"not ready: {e}")
+    return {"ok": True}
 ```
 
-A handler that returns 200 unconditionally is a gate that always opens, and will
-promote a build whose database is unreachable.
+**Do not make `/health` query the database or call another service.** Coolify
+gates deploys on it: a dependency that takes a few seconds too long to start
+then fails the check and rolls back a deploy that was completely fine, and the
+logs show a healthy app being killed for no visible reason.
+
+A `/health` that returns 200 unconditionally is fine — that is its job. `/ready`
+is where the real check goes, and it is what monitoring and debugging should use.
+
+*Violation:* either a deploy gate that always opens, or one that fails whenever a
+dependency is slow.
 
 ### R5 — Service-to-service communication uses compose service names
 
@@ -189,7 +204,42 @@ There is no opportunity to run migrations manually against the deployed database
 Apply them on startup — a FastAPI lifespan hook, Django `migrate`, Alembic
 `upgrade head`, whatever the stack uses — so every deploy converges the schema.
 
-### R8 — Every service needs `restart: unless-stopped`
+### R8 — The public service holds no credentials and no data access
+
+Database drivers, connection strings, API keys, model weights behind a paid
+endpoint: none of it belongs in the service the internet can reach. Put the data
+and the credentials in an internal service and have the public one ask for what
+it needs.
+
+```yaml
+  frontend:                                  # public
+    environment:
+      - BACKEND_URL=http://backend:8001      # an address, not a secret
+
+  backend:                                   # internal — no SERVICE_FQDN
+    environment:
+      - DATABASE_URL=postgresql://...@db:5432/appdb
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+```
+
+The template is built this way and is the reference: `backend/notes_dao.py` holds
+every SQL statement in the repository, `frontend/backend_client.py` holds every
+call to the backend, and the frontend image does not install a database driver at
+all. Follow that call path and copy it.
+
+Two further properties worth keeping, both consequences of the same split:
+
+- **One owner for the schema.** Every read and write goes through a single DAO in
+  a single service. Two services both holding a `DATABASE_URL` is how schemas
+  drift apart.
+- **One file per boundary.** Each service has exactly one file that knows how to
+  talk to the next layer down, so its routes stay thin and its tests can mock at
+  that seam without a database or a running container.
+
+*Violation:* a bug or an exploit in the internet-facing service reaches data it
+should never have been able to touch.
+
+### R9 — Every service needs `restart: unless-stopped`
 
 ---
 
@@ -219,9 +269,14 @@ Only the `test` job references directories. It currently reads:
 
 ```yaml
       - name: Install dependencies
-        run: pip install -r hello/requirements.txt httpx pytest
-      - name: Unit tests
-        run: cd hello && pytest tests/ -v
+        run: |
+          python -m pip install -r frontend/requirements.txt
+          python -m pip install -r backend/requirements.txt
+          python -m pip install pytest
+      - name: Unit tests — frontend
+        run: cd frontend && pytest tests/ -v
+      - name: Unit tests — backend
+        run: cd backend && pytest tests/ -v
 ```
 
 Point those at the real locations. **Leave the `deploy-staging` and `deploy-prod`
@@ -234,7 +289,7 @@ jobs depend on it, and removing the gate removes the point of the pipeline.
 
 ### `smoke-test.sh`
 
-It currently curls the template's endpoints (`/`, `/health`, `/time`, `/notes`).
+It currently curls the template's endpoints (`/`, `/health`, `/ready`, `/time`, `/notes`), all against the frontend — the only service with a public URL.
 Rewrite the endpoint list for the real application, keeping both modes: no argument
 means `docker compose up` locally then test `localhost`, and one argument means test
 that URL without touching Docker.
@@ -273,6 +328,10 @@ what the services are called.
 - Do not set the deployed domain in `docker-compose.yaml` — a human does that in
   Coolify's UI, per service
 - Do not assume `localhost` reaches another container (R5)
+- Do not put a database driver, connection string or API key in the public
+  service (R8) — move it to an internal service and call that instead
+- Do not make `/health` query the database or call another service (R4) — it
+  is the deploy gate, and a slow dependency would roll back a good deploy
 
 ---
 

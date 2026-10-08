@@ -61,7 +61,7 @@ real and running right now (CS VPN required).
 | Coolify | https://ml-capstone-admin.cs.byu.edu |
 | Template | `github.com/byu-ml-capstone/hello-world-app` |
 
-**The demo that makes slide 13 land.** Bump `APP_VERSION` in `hello/greetings.py`,
+**The demo that makes slide 13 land.** Bump `APP_VERSION` in `frontend/greetings.py`,
 push to `staging`, and put three windows up: the GitHub Actions run, Coolify's
 deployment log, and `curl .../health` in a loop. Students watch the version
 change under them. Total elapsed time is under two minutes.

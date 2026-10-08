@@ -548,41 +548,66 @@ git branch -a          # should list both main and staging
 
 The template ships **three** services in one Docker Compose project (each service self-contained in its own subdirectory):
 
-- `hello/` — the public FastAPI app on port 8000. This is what students grow into their real project.
-- `time/` — an internal FastAPI sidecar on port 8001 that returns the current UTC time. Stand-in for the kind of process you'd add later (a worker, a local model server, etc.). Reachable only from `hello`.
-- `db` (defined in `docker-compose.yaml`, no subdirectory) — an internal Postgres 16 database with a named-volume-backed data directory that survives restarts. Uses the stock `postgres:16-alpine` image; the app owns the schema and creates it at startup via a FastAPI lifespan hook in `hello/main.py`.
+- `frontend/` — the public FastAPI service on port 8000. The only one Traefik routes to. Serves pages and the HTTP API, and holds **no** database driver, no Postgres password, and no SQL.
+- `backend/` — an internal FastAPI service on port 8001. Your application logic, and the only code that touches the database. Reachable only from `frontend`.
+- `db` (defined in `docker-compose.yaml`, no subdirectory) — an internal Postgres 16 database with a named-volume-backed data directory that survives restarts. Uses the stock `postgres:16-alpine` image; `backend` owns the schema and creates it at startup via a FastAPI lifespan hook in `backend/main.py`.
 
-Compose starts all three together. Only `hello` gets a public URL in production; `time` and `db` stay on the internal Docker network. The Postgres data lives on a named volume (`db-data`) that persists across `docker compose down` / redeploys / reboots — see the **Persistent storage** section later in this guide for the full story.
+Compose starts all three together. Only `frontend` gets a public URL in production; `backend` and `db` stay on the internal Docker network. The Postgres data lives on a named volume (`db-data`) that persists across `docker compose down` / redeploys / reboots — see the **Persistent storage** section later in this guide for the full story.
 
-Run the unit tests first. These use FastAPI's `TestClient` to call the routes **in-process** — no containers, no HTTP socket, no network. They import `app` directly from `hello/main.py` and hand it fake requests, so they're fast (<1s). The twelve tests in `hello/tests/test_api.py` cover the greeting endpoints (`/`, `/languages`, `/health`), a mocked `/time` call to the sidecar, three `/notes` tests that mock the `NotesDAO` (list, insert, and 503-on-db-outage), and three `/admin/reset` tests (403 when disabled, calls DAO when enabled, 503 on db outage). All boundaries are mocked so the tests don't need any container running.
+**This is the same frontend / backend / database split from lecture**, and the template is deliberately wired the way your own project should be. A request for data travels `frontend` → `backend` → `db` and the answer comes back the same way. Three reasons that shape is worth keeping:
+
+1. **The service exposed to the internet holds no credentials.** A bug in `frontend` cannot leak or corrupt data it has no way to reach.
+2. **One owner for the schema.** Every read and write goes through a single DAO in a single service. Two services both holding a `DATABASE_URL` is how schemas drift apart.
+3. **Layers change independently.** Swap Postgres for something else and only `backend` changes; rebuild the UI and only `frontend` changes.
+
+Two files carry the pattern, one per service, and both are worth reading before you start on your own project:
+
+- `backend/notes_dao.py` — the `NotesDAO`. Every SQL statement in the repository lives here, so routes say `notes_dao.insert(body)` and never mention a cursor or a table name.
+- `frontend/backend_client.py` — the `BackendClient`. Every call to the backend lives here, so routes say `backend.create_note(body)` and never mention a URL or a status code.
+
+Each service has exactly one file owning its outward boundary. That is why both `main.py` files stay short, and why each test suite can mock at its own seam without needing a database or a running container.
+
+Run the unit tests first. These use FastAPI's `TestClient` to call the routes **in-process** — no containers, no HTTP socket, no network. They import `app` directly and hand it fake requests, so they're fast (<1s).
+
+There are **two suites, one per service**, and each mocks at its own boundary:
+
+- `frontend/tests/test_api.py` — 16 tests. The greeting endpoints (`/`, `/languages`, `/health`), `/ready`, and every data route with `BackendClient` mocked. These never construct an HTTP response.
+- `backend/tests/test_api.py` — 11 tests. `/health`, `/now`, the `/notes` routes with `NotesDAO` mocked, and the `/admin/reset` gate. These never construct a database cursor.
+
+That split is the payoff of the two boundary objects: each suite describes what its own routes do with whatever the layer below returns, so the tests stay short and stop breaking for unrelated reasons.
 
 ```bash
-pip install -r hello/requirements.txt httpx pytest
-cd hello && pytest -v
-# 12 tests pass
-cd ..
+python -m pip install -r frontend/requirements.txt -r backend/requirements.txt pytest
+
+cd frontend && pytest -v && cd ..    # 16 pass
+cd backend  && pytest -v && cd ..    # 11 pass
 ```
 
-Then start all three services detached via Docker Compose. **Shortcut:** the template ships a `smoke-test.sh` at the repo root that does exactly the block below (compose up + build, wait for `/health`, curl `/`, `/health`, `/time`, POST + GET `/notes`, print the stop command). Run `./smoke-test.sh` if you'd rather not type it out. The same script accepts an optional URL argument (`./smoke-test.sh http://<your-repo>-staging.ml-capstone.cs.byu.edu`) to smoke-test a deployed instance without touching local Docker — handy after a Coolify deploy. What the local flavor does under the hood:
+CI runs both — a failure in either blocks the deploy.
+
+Then start all three services detached via Docker Compose. Note the startup order is declared, not hoped for: `backend` waits for `db` to be healthy, and `frontend` waits for `backend`. **Shortcut:** the template ships a `smoke-test.sh` at the repo root that does exactly the block below (compose up + build, wait for `/health`, curl `/`, `/health`, `/ready`, `/time`, POST + GET `/notes`, print the stop command). Run `./smoke-test.sh` if you'd rather not type it out. The same script accepts an optional URL argument (`./smoke-test.sh http://<your-repo>-staging.ml-capstone.cs.byu.edu`) to smoke-test a deployed instance without touching local Docker — handy after a Coolify deploy. What the local flavor does under the hood:
 
 ```bash
-export SERVICE_FQDN_HELLO=http://localhost:8000   # stubs the compose interpolation
+export SERVICE_FQDN_FRONTEND=http://localhost:8000  # stubs the compose interpolation
 
-docker compose up -d --build                       # builds AND starts hello + time + db
+docker compose up -d --build                       # builds AND starts frontend + backend + db
 sleep 5                                            # first postgres boot takes a beat
 
-curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/health                  # liveness — does NOT call the backend
 # {"ok":true,"version":"0.1.1"}
+
+curl http://127.0.0.1:8000/ready                   # the frontend AND the backend behind it
+# {"ok":true,"frontend":"0.1.1","backend":"ok"}
 
 curl "http://127.0.0.1:8000/?lang=es"
 # {"hello":"Hola, mundo"}
 
-curl http://127.0.0.1:8000/time                    # proves hello -> time sidecar comms
-# {"from_time_service":{"utc":"..."}}
+curl http://127.0.0.1:8000/time                    # proves frontend -> backend comms
+# {"from_backend":{"utc":"..."}}
 
 curl -X POST http://127.0.0.1:8000/notes \
   -H 'Content-Type: application/json' \
-  -d '{"body":"hello persistence"}'                # proves hello -> db round-trip
+  -d '{"body":"hello persistence"}'                # proves frontend -> backend -> db
 # {"id":1,"body":"hello persistence","created_at":"..."}
 
 curl http://127.0.0.1:8000/notes                   # reads the row back from the db
@@ -718,7 +743,7 @@ The outputs give you both URLs and the Application UUIDs.
 
 Coolify's API won't let Terraform set per-service domains on a Docker Compose app, so this stays manual. For **each** of your two Applications, in the Coolify UI:
 
-**Access → the gear icon on "1 configured domain"** (or the **Domains** tab) → under service **`hello`** set the domain, then **Save**:
+**Access → the gear icon on "1 configured domain"** (or the **Domains** tab) → under service **`frontend`** set the domain, then **Save**:
 
 | Application | Domain |
 |---|---|
@@ -838,7 +863,7 @@ Navigate up to the project (breadcrumb at top) → click into the **staging** En
 Then on the General page:
 
 - **Name**: rename the auto-generated `<your-repo>:staging-<longhash>` to something readable like `<your-repo>-staging`. Save.
-- **Access → gear icon on "1 configured domain"** (or **Domains tab**) → **+ Add**. Service: `hello`. Protocol: `http`. Domain: `<your-repo>-staging.ml-capstone.cs.byu.edu` — **without** the `http://`, since the protocol is its own dropdown. Leave **Port** and **Path** empty; Traefik works out the routing. Delete the `<longhash>.sslip.io` placeholder and the `www.` variant if Coolify added it. Do NOT click "Generate Domain". Save.
+- **Access → gear icon on "1 configured domain"** (or **Domains tab**) → **+ Add**. Service: `frontend` (never `backend` or `db` — giving either a domain publishes it). Protocol: `http`. Domain: `<your-repo>-staging.ml-capstone.cs.byu.edu` — **without** the `http://`, since the protocol is its own dropdown. Leave **Port** and **Path** empty; Traefik works out the routing. Delete the `<longhash>.sslip.io` placeholder and the `www.` variant if Coolify added it. Do NOT click "Generate Domain". Save.
 
 > **Saving a domain does not re-route a container that is already running.** Traefik decides where a request goes using labels baked into the container when it started, so a container launched before you set the domain keeps the old rule and your new URL answers `404 page not found`. If the app is already deployed, hit **Redeploy** after saving. Setting the domain *before* your first deploy avoids this entirely — which is why this step comes before you push anything.
 
@@ -906,7 +931,7 @@ Nothing has been deployed yet — you set Coolify to "Manual deployments only" a
 git checkout staging
 ```
 
-Open `hello/greetings.py` in your editor (`code hello/greetings.py`, `vim hello/greetings.py`, etc.). Find the version line and bump it:
+Open `frontend/greetings.py` in your editor (`code frontend/greetings.py`, `vim frontend/greetings.py`, etc.). Find the version line and bump it:
 
 ```python
 APP_VERSION = "0.1.1"    # change this
@@ -916,7 +941,7 @@ APP_VERSION = "0.1.2"    # to this
 Save. Commit + push:
 
 ```bash
-git add hello/greetings.py
+git add frontend/greetings.py
 git commit -m "v0.1.2: initial staging deploy"
 git push
 ```
@@ -938,7 +963,7 @@ Prod hasn't been deployed yet (`curl http://<your-repo>.ml-capstone.cs.byu.edu/h
 
 **Step B — Second push: change the app's BEHAVIOR without updating the test.**
 
-Now demonstrate the tests-gate-deploy pattern. You'll change what the app *does* without updating the test that pins its behavior, and watch the pipeline block the deploy. Open `hello/greetings.py` again and make TWO changes:
+Now demonstrate the tests-gate-deploy pattern. You'll change what the app *does* without updating the test that pins its behavior, and watch the pipeline block the deploy. Open `frontend/greetings.py` again and make TWO changes:
 
 1. **Bump the version** again:
    ```python
@@ -955,13 +980,13 @@ Now demonstrate the tests-gate-deploy pattern. You'll change what the app *does*
 Save. Verify your diff shows exactly two changes:
 
 ```bash
-git diff hello/greetings.py
+git diff frontend/greetings.py
 ```
 
 **Step C — Commit + push. Deliberately do NOT update the tests yet.**
 
 ```bash
-git add hello/greetings.py
+git add frontend/greetings.py
 git commit -m "v0.1.3: update Spanish greeting"
 git push
 ```
@@ -986,7 +1011,7 @@ You now have two options:
 
 **Step E — Fix the test to match the new behavior.**
 
-Open `hello/tests/test_api.py` in your editor. Find `test_hello_spanish`:
+Open `frontend/tests/test_api.py` in your editor. Find `test_hello_spanish`:
 
 ```python
 def test_hello_spanish():
@@ -999,15 +1024,15 @@ def test_hello_spanish():
 Save. Verify locally:
 
 ```bash
-cd hello && python3 -m pytest tests/ -v && cd ..
+cd frontend && python3 -m pytest tests/ -v && cd ..
 ```
 
-All 5 tests should now pass locally.
+All 16 frontend tests should now pass locally.
 
 **Step F — Commit the test fix + push.**
 
 ```bash
-git add hello/tests/test_api.py
+git add frontend/tests/test_api.py
 git commit -m "test: update Spanish assertion to match v0.1.3 greeting"
 git push
 ```
@@ -1072,7 +1097,7 @@ Both should now return the 0.1.3 responses. **Your entire pipeline is proven end
 
 ### 11. Add a schema migration to persist real data
 
-Steps 1–10 got you a working push-to-deploy pipeline. But your app has been running alongside a **Postgres database** this whole time and you probably haven't noticed — the template ships a third service (`db`) in `docker-compose.yaml` that the `hello` app talks to via `notes_dao.py`. This step is where you touch it.
+Steps 1–10 got you a working push-to-deploy pipeline. But your app has been running alongside a **Postgres database** this whole time and you probably haven't noticed — the template ships a third service (`db`) in `docker-compose.yaml` that the `backend` service talks to via `notes_dao.py`. This step is where you touch it.
 
 **Step A — See the DB in action.** Locally (or in staging), hit the notes endpoints:
 
@@ -1089,18 +1114,30 @@ curl http://127.0.0.1:8000/notes
 
 The row you just inserted lives in the Postgres data volume. `docker compose down` then `up` again — GET `/notes` still returns your row. Only `docker compose down -v` wipes it. In production, Coolify preserves the volume across every redeploy.
 
-Now let's **evolve the schema**. You'll add a `priority` column to `notes` without losing any existing data. Adding a schema change is a coordinated four-file edit: **new migration file + DAO changes + endpoint model change + tests**, all in one commit.
+Now let's **evolve the schema**. You'll add a `priority` column to `notes` without losing any existing data.
+
+This is where the layered architecture earns its keep, and also where it asks something of you. The new field has to travel outward from the database to the public API, which means touching both services:
+
+```
+backend/migrations/002_add_priority.sql   the column exists
+backend/notes_dao.py                      SQL reads and writes it
+backend/main.py                           the backend accepts it over HTTP
+frontend/backend_client.py                the client can send it
+frontend/main.py                          the public API accepts it
+```
+
+Five files, and every one of them is a two-line edit. That is the point: because each boundary lives in exactly one file, a schema change is a series of small, obvious diffs rather than a hunt through a monolith. Work from the database outward — each layer is ready before the one above it needs it.
 
 **Step B — Look at the current migrations directory.**
 
 ```
-hello/migrations/
+backend/migrations/
 └── 001_create_notes.sql         -- creates the notes table on first startup
 ```
 
-That's the only migration active. When your app starts, `notes_dao.apply_migrations()` reads `hello/migrations/*.sql`, checks the `_migrations` table to see what's already been applied, and runs anything new. Adding a schema change means committing a new numbered `.sql` file — the runner picks it up automatically on the next deploy.
+They live under `backend/` because the backend owns the data. When it starts, `notes_dao.apply_migrations()` reads `backend/migrations/*.sql`, checks the `_migrations` table to see what's already been applied, and runs anything new. Adding a schema change means committing a new numbered `.sql` file — the runner picks it up automatically on the next deploy. The frontend never sees any of this.
 
-**Step C — Create the migration file.** New file `hello/migrations/002_add_priority.sql`:
+**Step C — Create the migration file.** New file `backend/migrations/002_add_priority.sql`:
 
 ```sql
 -- Migration 002 — add a priority column to notes.
@@ -1111,7 +1148,7 @@ ALTER TABLE notes ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0;
 
 The `NNN_description.sql` naming convention matters. The runner sorts alphabetically, so zero-padded prefixes keep order predictable up to 999 migrations.
 
-**Step D — Update the DAO.** In `hello/notes_dao.py`, extend `list_all()` to return the new column and `insert()` to accept + write it:
+**Step D — Update the DAO.** In `backend/notes_dao.py`, extend `list_all()` to return the new column and `insert()` to accept + write it. This is the only file in the repository where SQL changes:
 
 ```python
 def list_all(self) -> list[dict]:
@@ -1146,7 +1183,7 @@ def insert(self, body: str, priority: int = 0) -> dict:                        #
     }
 ```
 
-**Step E — Update the API model + route.** In `hello/main.py`, let `NoteIn` accept the new field and pass it through:
+**Step E — Let the backend accept it over HTTP.** In `backend/main.py`, add the field to `NoteIn` and pass it to the DAO:
 
 ```python
 class NoteIn(BaseModel):
@@ -1161,7 +1198,36 @@ def create_note(note: NoteIn):
         raise HTTPException(status_code=503, detail=f"db unreachable: {e}") from e
 ```
 
-**Step F — Update the tests.** The existing `/notes` tests mock the DAO, so they need to know the DAO now returns/accepts `priority`. In `hello/tests/test_api.py`, update the two `/notes` mocked tests:
+The backend is now complete: the column exists, the SQL uses it, and the internal API accepts it. Nothing public has changed yet — a `POST /notes` with a priority to the *frontend* would still silently drop it. That is the next two edits.
+
+**Step F — Teach the client to send it.** In `frontend/backend_client.py`, `create_note` needs the new argument:
+
+```python
+def create_note(self, body: str, priority: int = 0) -> dict:                   # ← new param
+    return self._request("POST", "/notes", json={"body": body,
+                                                 "priority": priority})        # ← send it
+```
+
+A default of `0` means every existing caller keeps working. Notice what this file still does *not* know: there is no `ALTER TABLE` here, no column type, no SQL at all. It only knows the shape of the JSON the backend accepts.
+
+**Step G — Let the public API accept it.** In `frontend/main.py`, the same two-line shape as the backend:
+
+```python
+class NoteIn(BaseModel):
+    body: str
+    priority: int = 0                                                          # ← new, defaults to 0
+
+@app.post("/notes", status_code=201)
+def create_note(note: NoteIn):
+    try:
+        return backend.create_note(note.body, note.priority)                   # ← pass priority
+    except BackendError as e:
+        raise _passthrough(e) from e
+```
+
+Two `NoteIn` models, one per service, is deliberate rather than duplication to eliminate. Each service validates its own input, so the backend stays safe no matter what calls it, and the public API can diverge later — rename a field, add a constraint, accept a different shape — without the backend caring.
+
+**Step H — Update the tests.** Each suite changes at its own boundary. In `backend/tests/test_api.py`, the DAO-mocked `/notes` tests:
 
 ```python
 def test_notes_list_returns_dao_output():
@@ -1189,18 +1255,42 @@ def test_notes_create_passes_priority_to_dao():
     m.assert_called_once_with("hello", 7)     # ← DAO called with both args
 ```
 
-Run `cd hello && pytest -v` and verify green before you push. Same tests-gate-deploy pattern from Step 10 — bad code shouldn't make it out of your machine.
+And in `frontend/tests/test_api.py`, the client-mocked one — note it asserts on the *call*, which is how you catch a frontend that quietly drops the field:
 
-**Step G — Push, watch the migration apply, verify.**
+```python
+def test_notes_create_passes_priority_through():
+    fake_row = {
+        "id": 42,
+        "body": "hello",
+        "priority": 7,
+        "created_at": "2026-08-20T12:00:00+00:00",
+    }
+    with patch.object(main.backend, "create_note", return_value=fake_row) as m:
+        r = client.post("/notes", json={"body": "hello", "priority": 7})
+    assert r.status_code == 201
+    assert r.json() == fake_row
+    m.assert_called_once_with("hello", 7)     # ← client called with both args
+```
+
+Run both suites and verify green before you push:
+
+```bash
+cd backend  && pytest -v && cd ..
+cd frontend && pytest -v && cd ..
+```
+
+Same tests-gate-deploy pattern from Step 10 — bad code shouldn't make it out of your machine. If you skipped Step F or G, the frontend test is the one that fails, and it fails with `assert_called_once_with` telling you exactly which argument went missing.
+
+**Step I — Push, watch the migration apply, verify.**
 
 ```bash
 git checkout staging
-git add hello/
+git add backend/ frontend/
 git commit -m "v0.1.4: add priority column to notes"
 git push
 ```
 
-Watch the Coolify Deployments tab (or run `./smoke-test.sh http://<your-repo>-staging.ml-capstone.cs.byu.edu` after ~30s). During startup, the `hello` container logs `applied migration 002_add_priority.sql`. Redeploying the same commit later would instead log `no pending migrations` — the runner sees 002 already recorded in `_migrations` and skips it.
+Watch the Coolify Deployments tab (or run `./smoke-test.sh http://<your-repo>-staging.ml-capstone.cs.byu.edu` after ~30s). During startup, the **`backend`** container logs `applied migration 002_add_priority.sql` — that is the container to check if the migration seems not to have run. Redeploying the same commit later would instead log `no pending migrations`, because the runner sees 002 already recorded in `_migrations` and skips it.
 
 Verify:
 
@@ -1244,11 +1334,29 @@ git checkout staging
 
 ### 1b. Replace the code with a sentiment classifier
 
-You can delete `hello/greetings.py`, `hello/main.py`, and `hello/tests/test_api.py` from the template — you'll replace them entirely with what's below. Keep `hello/Dockerfile`, `hello/requirements.txt`, `hello/conftest.py`, and the repo-root orchestration files (`docker-compose.yaml`, `docker-compose.override.yml`, `.github/workflows/ci.yml`, `smoke-test.sh`). Those stay the same shape; only the code inside `hello/` changes.
+You can delete `frontend/greetings.py`, `frontend/main.py`, and `frontend/tests/test_api.py` from the template — you'll replace them entirely with what's below. Keep `frontend/Dockerfile`, `frontend/requirements.txt`, `frontend/conftest.py`, and the repo-root orchestration files (`docker-compose.yaml`, `docker-compose.override.yml`, `.github/workflows/ci.yml`, `smoke-test.sh`). Those stay the same shape; only the code inside `frontend/` changes.
 
-You can also delete the `time/` sidecar entirely if you don't need it — it's just a stand-in to demonstrate the multi-service pattern. If you delete it, remove the `time:` service and the `hello.depends_on.time` block from `docker-compose.yaml`, and drop the `/time` endpoint + its test from `hello/`. Or leave it as a reference for when you *do* want to add a real sidecar (Postgres, Redis, a local model server).
+> **A note on where this code belongs.** This section builds the classifier as a
+> single service, inside `frontend/`, to keep the focus on the LLM call and the
+> CI pipeline. That is a teaching simplification. In the architecture the
+> template actually ships — and the one your capstone project should use — model
+> inference is application logic and belongs in **`backend`**, with `frontend`
+> proxying to it exactly the way `/notes` does: a method on
+> `frontend/backend_client.py`, a thin route in `frontend/main.py`, and the real
+> work behind the internal network.
+>
+> The reason is the same one that keeps SQL out of the frontend: your API key is
+> a credential. Put the LLM call in `backend` and the service exposed to the
+> internet never holds it. When you move from this walkthrough to your own
+> project, that is the shape to build — follow the `/notes` call path in the
+> template and copy it.
 
-### 1c. Write `hello/main.py`
+You can also delete the `backend/` service entirely if your app genuinely has no
+logic or data behind it — remove the `backend:` service and `frontend.depends_on`
+from `docker-compose.yaml`, and drop the `/time` endpoint and its tests. Most
+projects should keep it, and the `db` service with it.
+
+### 1c. Write `frontend/main.py`
 
 A FastAPI service with four endpoints:
 
@@ -1467,10 +1575,10 @@ Note the `.env` is **git-ignored** — never commit it, even though this file do
 
 ## Section 2: Test it locally
 
-Before adding tests or CI, make sure the app actually runs on your machine. Put your `.env` at the **repo root** (not inside `hello/`) — Docker Compose auto-picks up `.env` from the project root and the variables become available to all services.
+Before adding tests or CI, make sure the app actually runs on your machine. Put your `.env` at the **repo root** (not inside `frontend/`) — Docker Compose auto-picks up `.env` from the project root and the variables become available to all services.
 
 ```bash
-docker compose up -d --build   # builds hello/ (and any sidecars), starts detached
+docker compose up -d --build   # builds frontend/ (and any other services), starts detached
 ```
 
 In another terminal (or after a `sleep 3`):
@@ -1489,7 +1597,7 @@ You must be on VPN for the container to reach the LLM. Stop with `docker compose
 
 ## Section 3: Add tests
 
-Create `hello/tests/test_health.py`:
+Create `frontend/tests/test_health.py`:
 
 ```python
 from fastapi.testclient import TestClient
@@ -1511,19 +1619,19 @@ def test_analyze_requires_text():
     assert r.status_code == 422  # pydantic validation error
 ```
 
-`from main import app` works because `hello/conftest.py` marks `hello/` as pytest's rootdir — pytest auto-adds it to `sys.path`, so `main.py` is importable directly.
+`from main import app` works because `frontend/conftest.py` marks `frontend/` as pytest's rootdir — pytest auto-adds it to `sys.path`, so `main.py` is importable directly.
 
-Add pytest to `hello/requirements.txt`:
+Add pytest to `frontend/requirements.txt`:
 
 ```
 pytest==8.3.4
 ```
 
-Run locally from the `hello/` directory:
+Run locally from the `frontend/` directory:
 
 ```bash
-cd hello
-pip install -r requirements.txt
+cd frontend
+python -m pip install -r requirements.txt
 pytest -v
 cd ..
 ```
@@ -1540,7 +1648,7 @@ Unit tests (Section 3) verify functions in isolation. Real integration tests —
 
 ### Extend `/health` to exercise the real dependencies
 
-Update `hello/main.py` — replace the simple `/health` with a thorough version that actually calls the LLM:
+Update `frontend/main.py` — replace the simple `/health` with a thorough version that actually calls the LLM:
 
 ```python
 @app.get("/health")
@@ -1625,9 +1733,9 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install dependencies
-        run: pip install -r hello/requirements.txt httpx pytest
+        run: pip install -r frontend/requirements.txt httpx pytest
       - name: Unit tests
-        run: cd hello && pytest tests/ -v
+        run: cd frontend && pytest tests/ -v
 
   # Job 2 — deploy to STAGING. Runs after tests pass, only on push to `staging`.
   # Coolify runs its /health check post-deploy; if /health fails, staging deploy fails.
@@ -1662,8 +1770,8 @@ jobs:
 **Job 1 — `test`.**
 
 - Runs on **every** push and PR, regardless of branch.
-- Installs Python + the `hello/` service's dependencies (`pip install -r hello/requirements.txt httpx pytest`), then runs `pytest` from inside `hello/`. `httpx` is added on top because FastAPI's `TestClient` needs it, and `pytest` because it's a dev-only tool that doesn't belong in the app's `requirements.txt`.
-- If you add more services with their own tests (e.g. a `time/tests/` directory), add another install + pytest step for each — same pattern.
+- Installs Python + the `frontend/` service's dependencies (`pip install -r frontend/requirements.txt httpx pytest`), then runs `pytest` from inside `frontend/`. `httpx` is added on top because FastAPI's `TestClient` needs it, and `pytest` because it's a dev-only tool that doesn't belong in the app's `requirements.txt`.
+- If you add more services with their own tests, add another install + pytest step for each — same pattern. The template already does this: its workflow runs `frontend/tests/` and `backend/tests/` as two separate steps.
 - Consider adding a `docker compose build` step to catch Dockerfile bugs before deploy — cheap, and reveals problems that pip-installed pytest can't.
 - Uses GitHub-hosted runners (Ubuntu) — public internet, so unit tests can't hit the VPN-only classroom LLM (and won't have a GPU either). Keep unit tests offline: mock the network call, use FastAPI dependency overrides, OR add an env-guarded short-circuit in your app so tests can skip the expensive path. The reference `sentiment-test-app` uses the latter pattern — its code checks `SKIP_LOCAL_MODEL=1` and skips loading the ~500 MB local HuggingFace pipeline during CI (see `sentiment/main.py` and `sentiment/config.py` in that repo). Your own code has to opt in — the env var doesn't do anything unless you check it.
 
@@ -2015,7 +2123,7 @@ git checkout -b add-emoji-endpoint
 ### Step 2 — Write code and unit tests locally
 
 ```bash
-# ... edit hello/main.py, add hello/tests/test_emoji.py, verify with pytest and docker locally
+# ... edit frontend/main.py, add frontend/tests/test_emoji.py, verify with pytest and docker locally
 pytest tests/ --ignore=tests/integration -v      # unit tests
 docker build -t sentiment-app .                  # verify Dockerfile
 ```
@@ -2168,10 +2276,10 @@ One mount on `db`: **`db-data:/var/lib/postgresql/data`** — the Postgres data 
 
 ## Who owns the schema
 
-The db container ships empty (just the `POSTGRES_USER`/`POSTGRES_DB` from the env vars — no app tables). The `hello` app owns its schema and creates it at startup via a FastAPI lifespan hook. All the actual SQL lives in a small **DAO** (`hello/notes_dao.py`) — a `NotesDAO` class that encapsulates every database interaction:
+The db container ships empty (just the `POSTGRES_USER`/`POSTGRES_DB` from the env vars — no app tables). The **`backend`** service owns the schema and creates it at startup via a FastAPI lifespan hook. All the actual SQL lives in a small **DAO** (`backend/notes_dao.py`) — a `NotesDAO` class that encapsulates every database interaction. `frontend` has no database driver installed at all; it asks `backend` over the internal network:
 
 ```python
-# hello/notes_dao.py — abbreviated
+# backend/notes_dao.py — abbreviated
 CREATE_NOTES_SQL = """
 CREATE TABLE IF NOT EXISTS notes (
     id         SERIAL       PRIMARY KEY,
@@ -2193,7 +2301,7 @@ class NotesDAO:
 And `main.py` becomes thin — routes handle HTTP framing and delegate to the DAO:
 
 ```python
-# hello/main.py — abbreviated
+# backend/main.py — abbreviated
 from notes_dao import NotesDAO
 notes_dao = NotesDAO(DATABASE_URL)
 
@@ -2212,7 +2320,7 @@ def list_notes():
 **Why the DAO?** Three things get easier as you scale:
 
 - **Routes stay thin.** `main.py` reads like an HTTP contract, not a SQL script. Compare grepping `main.py` for "what HTTP endpoints exist" against `notes_dao.py` for "what SQL runs" — clear split, easy to navigate.
-- **Testing is cleaner.** Route tests patch DAO methods (`patch.object(main.notes_dao, "list_all", return_value=[...])`) instead of mocking psycopg's cursor/context-manager stack. See `hello/tests/test_api.py` — the `/notes` tests are ~3 lines each vs. ~10 lines when mocking psycopg directly.
+- **Testing is cleaner.** Route tests patch DAO methods (`patch.object(main.notes_dao, "list_all", return_value=[...])`) instead of mocking psycopg's cursor/context-manager stack. See `backend/tests/test_api.py` — the `/notes` tests are ~3 lines each vs. ~10 lines when mocking psycopg directly. The frontend gets the same benefit one layer up: `frontend/tests/test_api.py` patches `BackendClient` methods and never constructs an HTTP response.
 - **Swappable storage.** Want SQLite for a quick local test? Point NotesDAO at a different URL. Outgrow raw SQL and want SQLAlchemy? Replace `notes_dao.py`; `main.py` is unaffected because it only sees Python dicts.
 
 Why this pattern (vs. an `init.sql` inside the db container)?
@@ -2320,7 +2428,7 @@ Every real app changes its schema over time: add a column, add a table, drop a s
 
 ### How the runner works
 
-`hello/notes_dao.py` has an `apply_migrations()` method that runs from FastAPI's **lifespan hook** in `hello/main.py`. The lifespan hook fires **once per container startup**, before FastAPI accepts any HTTP requests. Concretely, that's:
+`backend/notes_dao.py` has an `apply_migrations()` method that runs from FastAPI's **lifespan hook** in `backend/main.py`. The lifespan hook fires **once per container startup**, before FastAPI accepts any HTTP requests. Concretely, that's:
 
 - Every Coolify redeploy (each deploy spins up a new hello container)
 - Every `docker compose up` locally
@@ -2333,7 +2441,7 @@ What the runner does on each startup:
 
 1. Ensures a `_migrations` tracking table exists in the db (idempotent, one `CREATE TABLE IF NOT EXISTS`).
 2. Reads the list of **already-applied** migration filenames from that table.
-3. Globs `hello/migrations/*.sql`, sorts alphabetically.
+3. Globs `backend/migrations/*.sql`, sorts alphabetically.
 4. **Filters to pending** — files in the glob that aren't already in the `_migrations` list.
 5. For each pending file (in order): opens a transaction, executes the SQL, inserts the filename into `_migrations`, commits. If the SQL fails, the whole transaction rolls back and the filename is NOT recorded — so a broken migration doesn't get silently skipped on the next attempt.
 
@@ -2356,14 +2464,14 @@ Concrete timeline for a deploy that adds migration `003_add_tag.sql`:
 5. FastAPI starts serving. First /notes request hits the new schema.
 ```
 
-The whole runner is ~40 lines of Python — go read `hello/notes_dao.py`. Alembic is the industry-standard version of the same idea, with more features (CLI, autogenerate, down-migrations). You'd promote to Alembic when the ~40-line homegrown runner starts feeling constraining. For a class project, it doesn't.
+The whole runner is ~40 lines of Python — go read `backend/notes_dao.py`. Alembic is the industry-standard version of the same idea, with more features (CLI, autogenerate, down-migrations). You'd promote to Alembic when the ~40-line homegrown runner starts feeling constraining. For a class project, it doesn't.
 
 ### Staging ↔ prod sync (this is why migrations matter)
 
 Because `apply_migrations()` runs on every deploy in every environment, and **staging and prod deploy from the same code in the same git repo**, the schema stays in sync automatically:
 
 ```
-You edit hello/notes_dao.py + add hello/migrations/002_add_priority.sql
+You edit backend/notes_dao.py + add backend/migrations/002_add_priority.sql
         ↓ commit + push to `staging`
 Coolify redeploys staging
         ↓ apply_migrations() runs 002_add_priority.sql against staging's db
@@ -2419,7 +2527,7 @@ If you need to fix a migration that's already shipped, write **another** migrati
 **Local iteration is the exception.** While you're still developing a migration and it hasn't hit staging yet, edit + reset + rerun as much as you want:
 
 ```bash
-# Edit hello/migrations/003_add_thing.sql
+# Edit backend/migrations/003_add_thing.sql
 docker compose restart hello                    # lifespan re-runs migrations
 docker compose logs hello | grep migration      # see what happened
 

@@ -176,10 +176,10 @@ Container frontend-xxxx Started
 ```
 
 **This bites when you restructure the template.** The template ships a health check
-on all three services. Rename `hello` to `frontend`, split it into `frontend` +
-`backend`, or add a service, and it is easy to carry over `expose:`, `restart:` and
-`${SERVICE_FQDN_*}` while leaving the health check behind — the app works locally,
-deploys cleanly, and then quietly dies.
+on all three services. Rename `frontend`, split `backend` in two, or add a service,
+and it is easy to carry over `expose:`, `restart:` and `${SERVICE_FQDN_*}` while
+leaving the health check behind — the app works locally, deploys cleanly, and then
+quietly dies.
 
 Every long-running service needs one. For an HTTP service:
 
@@ -217,7 +217,7 @@ whose database connection is broken.
 
 Container is running but not reachable from Coolify's proxy. Most common causes:
 
-- App bound to `127.0.0.1` inside container instead of `0.0.0.0` — nothing outside the container can reach it. Fix in `hello/main.py` / `uvicorn` command (or the equivalent path in your service's directory).
+- App bound to `127.0.0.1` inside container instead of `0.0.0.0` — nothing outside the container can reach it. Fix in `frontend/main.py` / `uvicorn` command (or the equivalent path in your service's directory).
 - `EXPOSE` in Dockerfile doesn't match the port Coolify's config expects (usually 8000)
 - App crashed on startup — check Coolify's logs
 
@@ -364,7 +364,7 @@ The `*.cs.byu.edu` DigiCert cert is valid Jul 9 2026 → Jan 23 2027. Renewal is
 
 ### `/notes` (or another DB-backed endpoint) returns 500 after a deploy
 
-The app couldn't apply its schema. Check the Coolify container logs for the `hello` (or your app's) service — look for `applied migration ...` or a `psycopg` traceback. Common causes:
+The app couldn't apply its schema. Check the Coolify container logs for the **`backend`** service — that is where migrations run, and a common wrong turn is reading the `frontend` logs and finding nothing. Look for `applied migration ...` or a `psycopg` traceback. Common causes:
 
 - **Migration SQL is broken.** Fix the `.sql` file, push. `apply_migrations()` didn't record the failed one (the tracking-table insert is in the same transaction as the SQL), so it'll retry on the next deploy.
 - **Column removed but code still queries it.** You dropped a column in a migration but forgot to update `list_all()` / `insert()` in the DAO. Push the DAO fix.

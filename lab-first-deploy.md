@@ -143,14 +143,14 @@ The first build pulls images and installs dependencies and takes a few minutes.
 Start it, then keep reading — steps 5 and 6 happen in the browser while this runs.
 
 ```bash
-export SERVICE_FQDN_HELLO=http://localhost:8000
+export SERVICE_FQDN_FRONTEND=http://localhost:8000
 docker compose up -d --build
 ```
 
 When it finishes, check all three services and run the smoke test:
 
 ```bash
-docker compose ps        # hello, time, db — all "healthy"
+docker compose ps        # frontend, backend, db — all "healthy"
 ./smoke-test.sh
 ```
 
@@ -158,14 +158,44 @@ docker compose ps        # hello, time, db — all "healthy"
 here means your code is sound; anything that fails now will also fail deployed,
 just slower.
 
+**The three services, and why it is worth copying the shape.** This is the same
+frontend / backend / database split from lecture, and the template is wired the
+way your project should be:
+
+| Service | Reachable from | Holds |
+|---|---|---|
+| `frontend` | the internet, via Traefik | pages and the HTTP API. **No** database driver, no password, no SQL |
+| `backend` | only `frontend` | your application logic, and the only code that touches the database |
+| `db` | only `backend` | Postgres, on a volume that survives restarts |
+
+A request for data travels `frontend` → `backend` → `db` and the answer comes
+back the same way. Run `curl -s localhost:8000/notes` and you have exercised all
+three. The split matters for a reason that outlives the lab: the service exposed
+to the internet holds no credentials, so a bug there cannot leak or corrupt data
+it has no way to reach.
+
+Two files are worth reading before you start on your own project, because they
+are the pattern:
+
+- `backend/notes_dao.py` — every SQL statement in the repo lives here, so routes
+  say `notes_dao.insert(body)` and never mention a cursor.
+- `frontend/backend_client.py` — every call to the backend lives here, so routes
+  say `backend.create_note(body)` and never mention a URL.
+
+Each service has one file owning one boundary, which is why both `main.py` files
+stay short and why each test suite can mock at its own seam without a database
+or a running container.
+
 Poke at it by hand too:
 
 ```bash
 curl -s localhost:8000/
 curl -s localhost:8000/health
+curl -s localhost:8000/ready            # frontend AND the backend behind it
 curl -s "localhost:8000/?lang=es"
+curl -s localhost:8000/time             # frontend -> backend
 curl -s -X POST localhost:8000/notes -H 'Content-Type: application/json' -d '{"body":"hello"}'
-curl -s localhost:8000/notes
+curl -s localhost:8000/notes            # frontend -> backend -> db
 ```
 
 Leave it running or `docker compose down` — either is fine from here on.
@@ -362,8 +392,9 @@ container when it starts, so a domain set afterwards leaves your URL returning
    `<your-repo>:staging-<random text>` — the random part is normal.
 5. In the **Access** section, click the **gear icon** next to *"1 configured domain"*
 6. Click **+ Add**
-7. **Service:** `hello` — this dropdown lists your containers, and `hello` is the
-   only one users should reach
+7. **Service:** `frontend` — this dropdown lists your containers, and `frontend`
+   is the only one users should reach. `backend` and `db` are internal; giving
+   either a domain would publish it
 8. **Protocol:** `http` — check it, do not assume
 9. **Domain:** `<your-repo>-staging.ml-capstone.cs.byu.edu`
    — **without** the `http://`; the protocol is the separate dropdown above
@@ -395,7 +426,7 @@ variant if Coolify added one. Do **not** click "Generate Domain".
 Bump the version so you can see your change arrive:
 
 ```bash
-# in hello/greetings.py
+# in frontend/greetings.py
 APP_VERSION = "0.1.2"
 ```
 
@@ -559,9 +590,10 @@ automatic.
 
 ## 13. Moving on to your own project
 
-`hello-world-app` is scaffolding. Your real project will have its own services —
-commonly a `frontend`, a `backend`, and a `db`. You can throw away everything in
-`hello/` and `time/` and replace it.
+`hello-world-app` is scaffolding, but it is scaffolding in the shape your project
+should take: a `frontend` users reach, a `backend` holding your logic and owning
+the data, and a `db`. You can throw away everything inside `frontend/` and
+`backend/` and replace it with your own code — the shape is what to keep.
 
 **What you can change freely:** service names, how many services there are, the
 languages, the frameworks, the Dockerfiles, the dependencies, the endpoints. None
@@ -577,12 +609,12 @@ bitten someone in this class.
 
 ### 1. The domain must point at the service that actually serves users
 
-Rename `hello` to `frontend` and Coolify still has the domain attached to a service
-called `hello` — which no longer exists. Traefik then has no route and your URL
+Rename `frontend` to `web` and Coolify still has the domain attached to a service
+called `frontend` — which no longer exists. Traefik then has no route and your URL
 returns `404 page not found`, even though the deploy succeeded and the containers
 are healthy.
 
-Re-attach it, **in both environments**: lab step 10, but pick `frontend` in the
+Re-attach it, **in both environments**: lab step 10, but pick the new name in the
 Service dropdown.
 
 ### 2. `${SERVICE_FQDN_<SERVICE>}` must match that service's name
@@ -591,7 +623,7 @@ The variable name follows the service, uppercased, with `-` becoming `_`:
 
 | Service | Variable |
 |---|---|
-| `hello` | `${SERVICE_FQDN_HELLO}` |
+| `frontend` | `${SERVICE_FQDN_FRONTEND}` |
 | `frontend` | `${SERVICE_FQDN_FRONTEND}` |
 | `web-ui` | `${SERVICE_FQDN_WEB_UI}` |
 
@@ -647,11 +679,22 @@ container over the internal Docker network. Your local
 `docker-compose.override.yml` is where a host port binding belongs, since that file
 is local-only and Coolify ignores it.
 
-### 5. Keep a real health endpoint on the public service
+### 5. Keep `/health` cheap, and put the real check somewhere else
 
-Something like `/health` that returns 200 when the app can actually work — it can
-reach the database, it can reach the service it depends on. It is what your health
-check tests and therefore what decides whether a deploy reaches users.
+The template ships both, and the split is deliberate:
+
+- **`/health`** answers "is this process alive" and touches nothing downstream.
+  The frontend's `/health` does not call the backend; the backend's does not
+  query Postgres.
+- **`/ready`** answers "is the whole stack working" and is *allowed* to fail.
+
+Coolify gates deploys on the health check. If `/health` queried the database,
+then a Postgres start that took a few seconds too long would fail the check and
+roll back a deploy that was completely fine. That is a genuinely confusing
+failure — the logs show a healthy app being killed.
+
+So keep the gate cheap and keep a separate endpoint for the honest answer. Point
+your monitoring and your own debugging at `/ready`; let Coolify watch `/health`.
 
 ### 6. Have one URL that exercises the whole stack, and test *that*
 
@@ -714,7 +757,7 @@ users do, not after.
 ### Keep the two branches the same shape
 
 Restructure on `staging`, get it working, *then* promote. If `staging` defines
-`frontend`/`backend`/`db` while `main` still has `hello`/`time`/`db`, your two
+`web`/`api`/`db` while `main` still has `frontend`/`backend`/`db`, your two
 environments are running different applications, and promoting swaps production for
 something that has never been tested in that environment.
 
