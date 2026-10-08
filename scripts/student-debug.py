@@ -195,7 +195,7 @@ def classify(apps_for_team, running):
     return st, len(rows), len(doms), deploys, up, last
 
 
-def overview(apps, running):
+def overview(apps, running, show_all=False):
     teams: dict[str, list[dict]] = {}
     for a in apps:
         teams.setdefault(a["team"], []).append(a)
@@ -225,18 +225,45 @@ def overview(apps, running):
         rows.append((rank[st], team, st, step, napps, ndom, dep, up, last))
     rows.sort(key=lambda r: (r[0], r[1]))
 
+    # Collapse the two bands that need no action, so the default output fits on
+    # a screen. Everything is still there with --all.
+    COLLAPSE = {} if show_all else {"LIVE", "not started"}
+
+    def wrap(names, width=86, indent="     "):
+        line, out = indent, []
+        for n in names:
+            piece = n + ", "
+            if len(line) + len(piece) > width:
+                out.append(line.rstrip().rstrip(","))
+                line = indent
+            line += piece
+        if line.strip():
+            out.append(line.rstrip().rstrip(","))
+        return out
+
     print(f"\n{C_B}{'STUDENT':<32}{'ON STEP':<9}{'STATUS':<14}{'APPS':>5}{'DOM':>5}"
           f"{'DEPL':>6}{'UP':>4}  LAST{C_Z}")
     print("─" * 88)
-    last_rank = None
+    last_rank, collapsed = None, {}
     for rk, team, st, step, napps, ndom, dep, up, last in rows:
+        name = team.replace("'s Sandbox", "")[:31]
+        if st in COLLAPSE:
+            collapsed.setdefault(st, []).append(name)
+            continue
         if last_rank is not None and rk != last_rank:
             print()
         last_rank = rk
         c = colour[st]
-        name = team.replace("'s Sandbox", "")[:31]
         print(f"{name:<32}{step:<9}{c}{st:<14}{C_Z}{napps:>5}{ndom:>5}"
               f"{dep:>6}{up:>4}  {last}")
+
+    for st in ("LIVE", "not started"):
+        if st in collapsed:
+            c = colour[st]
+            print(f"\n{c}{st}{C_Z} ({len(collapsed[st])}) "
+                  f"{C_DIM}— use --all to list them as rows{C_Z}")
+            for l in wrap(sorted(collapsed[st])):
+                print(l)
 
     counts: dict[str, int] = {}
     for r in rows:
@@ -451,6 +478,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("student", nargs="?", help="name, team or project substring")
+    ap.add_argument("--all", action="store_true",
+                    help="list every student as a row, including LIVE and not-started")
     args = ap.parse_args()
 
     apps = fetch_apps()
@@ -461,7 +490,7 @@ def main():
     if args.student:
         deep_dive(args.student, apps, running)
     else:
-        overview(apps, running)
+        overview(apps, running, show_all=args.all)
 
 
 if __name__ == "__main__":

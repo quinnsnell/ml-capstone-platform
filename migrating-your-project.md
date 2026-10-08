@@ -239,6 +239,13 @@ Rewrite the endpoint list for the real application, keeping both modes: no argum
 means `docker compose up` locally then test `localhost`, and one argument means test
 that URL without touching Docker.
 
+Keep the shape of the template's `/notes` check: a POST that writes and a GET that
+reads the row back. That pair is what proves the whole stack — the frontend routes,
+the backend handler, and the database connection — rather than just proving a port
+is open. A smoke test made only of `/health` and static pages passes on a broken
+deployment with an unreachable database. Pick the project's equivalent of that
+round-trip and make it the last check, so a failure is unambiguous.
+
 ### `docker-compose.override.yml`
 
 Local-only. Host port bindings and development environment variables go here.
@@ -292,10 +299,36 @@ docker compose ps                               # every service: healthy
 # 4. the health endpoint answers
 curl -fsS localhost:<port>/health
 
-# 5. the smoke test passes
+# 5. a real request goes all the way through: frontend -> backend -> database.
+#    /health usually only proves the process is listening, so pick a URL that
+#    cannot be answered without a database read, write one row, then read it
+#    back. Examples of the shape to aim for:
+#
+#      a search/list page served by the frontend that renders rows from the db
+#        curl -fsS "localhost:8080/search?q=test&limit=5"
+#      a detail page that must look up a record by id
+#        curl -fsS "localhost:8080/items/1"
+#      a write, then a read proving it landed
+#        curl -fsS -X POST "localhost:8080/api/items" \
+#             -H 'Content-Type: application/json' -d '{"name":"smoke-test"}'
+#        curl -fsS "localhost:8080/api/items" | grep smoke-test
+#      a model-inference route that logs its prediction to the db
+#        curl -fsS -X POST "localhost:8080/api/predict" \
+#             -H 'Content-Type: application/json' -d '{"text":"this was great"}'
+#        curl -fsS "localhost:8080/api/predictions" | grep 'this was great'
+#
+#    Replace these with the project's actual routes. If every route you can
+#    think of answers without touching the database, the migration has not
+#    been proven — find or add one that does.
+
+# 6. the smoke test passes
 ./smoke-test.sh
 
-# 6. clean up
+# 7. restart and confirm the row survived — proves the volume, not just the query
+docker compose down && SERVICE_FQDN_<PUBLIC>=http://localhost:<port> docker compose up -d
+curl -fsS "localhost:<port>/api/items" | grep smoke-test   # same URL as step 5
+
+# 8. clean up
 docker compose down
 ```
 
@@ -317,6 +350,10 @@ Finish by reporting this, because it cannot be automated from the repository:
 3. **Both branches should end up the same shape.** If the migration happened on
    `staging` only, promoting to `main` will deploy a different application to
    production than the one that was tested.
+4. **Run the step-5 full-stack URL against the live domain, not just localhost** —
+   on the CS VPN, with the real staging hostname substituted for `localhost:<port>`.
+   A deployment can serve the frontend correctly while the backend cannot reach the
+   database container, and only a request that needs the database will show it.
 
 Also report: which service is public, what the health endpoint checks, what the
 `test` job now runs, and anything that was guessed rather than asked.
