@@ -64,6 +64,17 @@ def containers() -> dict[str, list[tuple[str, bool]]]:
     return found
 
 
+def placeholder(d: str) -> bool:
+    """Coolify's own auto-generated domain, which no student chose.
+
+    Two forms: the sslip.io wildcard, and `<service>-<uuid>.<host IP>` when the
+    instance has no wildcard domain configured. Counting either as a real
+    domain makes an unconfigured application look finished.
+    """
+    h = re.sub(r"^https?://", "", d.strip()).lower()
+    return "sslip.io" in h or bool(re.search(r"\.\d{1,3}(\.\d{1,3}){3}$", h))
+
+
 def real_domains(blob: str) -> list[tuple[str, str]]:
     """[(service, hostname)] for domains that aren't Coolify's sslip.io filler."""
     if not blob:
@@ -76,9 +87,101 @@ def real_domains(blob: str) -> list[tuple[str, str]]:
     for svc, v in data.items():
         for d in (v.get("domain") or "").split(","):
             d = d.strip()
-            if d and "sslip.io" not in d:
+            if d and not placeholder(d):
                 out.append((svc, re.sub(r"^https?://", "", d)))
     return out
+
+
+def host_only(d: str) -> str:
+    """Normalise a domain for comparison: no scheme, no port, no path, no case."""
+    d = re.sub(r"^https?://", "", d.strip()).lower()
+    return d.split("/")[0].split(":")[0]
+
+
+def malformed_domains(blob: str) -> list[tuple[str, str, str]]:
+    """[(service, raw value, why it cannot route)] for domains typed wrong.
+
+    Coolify stores whatever is pasted into the Domains box, and Traefik then
+    matches on it literally. Every one of these has cost a student a lab
+    session: `https://` (student apps are HTTP only), `http//` with the colon
+    missing, and a `:port` suffix that Traefik does not want.
+    """
+    if not blob:
+        return []
+    try:
+        data = json.loads(blob)
+    except Exception:
+        return []
+    out = []
+    for svc, v in data.items():
+        for raw in (v.get("domain") or "").split(","):
+            raw = raw.strip()
+            if not raw or "sslip.io" in raw:
+                continue
+            rest = re.sub(r"^https?://", "", raw)
+            why = None
+            if raw.lower().startswith("https://"):
+                why = "stored as https — student apps are HTTP only"
+            elif "/" in rest:
+                why = "has a '/' — scheme typed wrong, e.g. http// for http://"
+            elif re.search(r":\d+$", rest):
+                why = "has a :port — Traefik routes, so drop the port"
+            elif not re.fullmatch(r"[A-Za-z0-9.-]+", rest):
+                why = "not a valid hostname"
+            elif "." not in rest:
+                why = "not fully qualified"
+            if why:
+                out.append((svc, raw, why))
+    return out
+
+
+def domain_collisions(apps) -> dict[str, list[dict]]:
+    """hostname -> every application claiming it, for hostnames claimed twice.
+
+    Pasting the same URL into both staging and production is silent: both
+    deploy, both report healthy, and Traefik routes the hostname to whichever
+    container registered its label last. The student sees one environment no
+    matter which URL they open, and nothing in the deploy logs says why.
+    """
+    byhost: dict[str, list[dict]] = {}
+    for a in apps:
+        if not a["uuid"]:
+            continue
+        for svc, host in real_domains(a["domains"]):
+            byhost.setdefault(host_only(host), []).append(
+                {"team": a["team"], "env": a["env"], "svc": svc,
+                 "uuid": a["uuid"], "project": a["project"]})
+    out = {}
+    for host, claims in byhost.items():
+        # Two services inside one application is also a conflict, but a
+        # different one, so keep anything claimed more than once.
+        if len(claims) > 1:
+            out[host] = claims
+    return out
+
+
+def collision_report(coll: dict[str, list[dict]], only_team: str | None = None):
+    """Print the collisions, grouped by hostname. Returns uuids involved."""
+    hit = set()
+    for host, claims in sorted(coll.items()):
+        if only_team and not any(c["team"] == only_team for c in claims):
+            continue
+        uuids = {c["uuid"] for c in claims}
+        teams = {c["team"] for c in claims}
+        for c in claims:
+            hit.add(c["uuid"])
+        if len(teams) > 1:
+            kind = "claimed by MORE THAN ONE STUDENT"
+        elif len(uuids) > 1:
+            kind = "same URL on two applications"
+        else:
+            kind = "same URL on two services of one application"
+        print(f"  {C_BAD}FAIL{C_Z} {host}  {C_DIM}({kind}){C_Z}")
+        for c in sorted(claims, key=lambda x: (x["team"], x["env"])):
+            who = "" if only_team else c["team"].replace("'s Sandbox", "") + "  "
+            print(f"         {C_DIM}{who}{c['env']:<11} service '{c['svc']}'"
+                  f"  {c['uuid']}{C_Z}")
+    return hit
 
 
 def fetch_apps() -> list[dict]:
@@ -156,6 +259,7 @@ LAB_STEP = {
     "LIVE":         "done",
     "BROKEN":       "11",
     "stuck?":       "11",
+    "dup domain":   "10",
 }
 
 
@@ -163,6 +267,7 @@ LAB_STEP = {
 STATUS_ORDER = [
     ("BROKEN",        C_BAD,  "deployed, nothing running"),
     ("stuck?",        C_BAD,  "deploy failed"),
+    ("dup domain",    C_BAD,  "staging and production share a URL"),
     ("no domains",    C_WARN, "terraform done, step 10 not done"),
     ("not deployed",  C_WARN, "configured, never pushed"),
     ("staging only",  C_DIM,  "not promoted to production yet"),
@@ -213,11 +318,21 @@ def overview(apps, running, show_all=False):
     need = any(not [a for a in v if a["uuid"]] for v in teams.values())
     owners = repo_owners() if (people and need) else {}
 
+    # Computed over every application, not just this team's: a hostname taken
+    # by another student is the same breakage and worse to diagnose.
+    coll = domain_collisions(apps)
+    colliding = {c["uuid"] for claims in coll.values() for c in claims}
+
     rank = {name: i for i, (name, _, _) in enumerate(STATUS_ORDER)}
     colour = {name: c for name, c, _ in STATUS_ORDER}
     rows = []
     for team in teams:
         st, napps, ndom, dep, up, last = classify(teams[team], running)
+        # "LIVE" is a lie when both URLs serve the same container. BROKEN and
+        # stuck? are worse problems, so they keep precedence.
+        if st not in ("BROKEN", "stuck?") and any(
+                a["uuid"] in colliding for a in teams[team]):
+            st = "dup domain"
         step = LAB_STEP.get(st, "?")
         if st == "not started":
             gh_user = (people.get(team, {}).get("github_username") or "").lower()
@@ -286,6 +401,14 @@ def overview(apps, running, show_all=False):
              "11": "step 11 — push to staging",
              "12": "step 12 — promote to production",
              "done": "finished the lab"}
+    if coll:
+        print(f"\n{C_BAD}Duplicate domains{C_Z}"
+              f"{C_DIM} — Traefik routes a hostname to whichever container"
+              f" registered last{C_Z}")
+        collision_report(coll)
+        print(f"  {C_DIM}fix: lab step 10 — staging and production need"
+              f" different hostnames{C_Z}")
+
     print(f"\n{C_B}Where the class is{C_Z}")
     for k in order:
         if steps.get(k):
@@ -352,66 +475,168 @@ def compose_services(text: str) -> dict[str, dict]:
             svcs[cur]["expose"] = True
         elif re.match(r"^    ports:", line):
             svcs[cur]["ports"] = True
-        fq = re.search(r"\$\{SERVICE_FQDN_([A-Z0-9_]+)\}", line)
+        # Brace optional, and stop at the name: a default value
+        # (${SERVICE_FQDN_FRONTEND:-http://localhost:8000}) is both legal and
+        # common, and requiring the closing brace missed every one of them.
+        fq = re.search(r"\$\{?SERVICE_FQDN_([A-Z0-9_]+)", line)
         if fq and not svcs[cur]["fqdn"]:
             svcs[cur]["fqdn"] = fq.group(1)
     return svcs
 
 
 # ------------------------------------------------- step 13: their own project
-# The lab ends with the stock template deployed. The real assignment is to
-# replace it with their own project, which is visible in the compose file: the
-# template's services are `hello`, `time` and `db`, so anything else is theirs.
+# The lab ends with the stock template deployed; the assignment is to replace it
+# with their own project. Service names cannot answer whether that happened --
+# plenty of students convert hello-world in place and keep `hello`/`time`/`db`.
+# So compare file trees against the template instead: git blob SHAs are content
+# hashes, so identical content gives an identical SHA in any repo, with no need
+# for shared history (template-generated repos have none).
+TEMPLATE_REPO = "hello-world-app"
 STOCK = {"hello", "time", "db"}
+SUFFIX = "'s Sandbox"
+
+# Files the lab itself tells them to touch, or that carry no project signal.
+# Everything else that is new or modified is their own work.
+LAB_NOISE = {
+    "README.md", ".gitignore", "hello/greetings.py",
+    "terraform/README.md", "terraform/terraform.tfvars.example",
+}
 
 
-def project_shapes(repos: list[str]) -> dict[str, dict]:
-    """repo -> {"main": set|None, "staging": set|None} of compose service names.
+def repo_tree(repo: str, ref: str) -> dict[str, str] | None:
+    """path -> blob sha for every file on that ref, or None if unreadable."""
+    r = subprocess.run(
+        ["gh", "api", f"/repos/{ORG}/{repo}/git/trees/{ref}?recursive=1",
+         "--jq", '.tree[]|select(.type=="blob")|.path+" "+.sha'],
+        capture_output=True, text=True)
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    out = {}
+    for line in r.stdout.strip().split("\n"):
+        if " " in line:
+            path, sha = line.rsplit(" ", 1)
+            out[path] = sha
+    return out or None
 
-    None means the file could not be read on that branch -- missing, renamed,
-    or the branch does not exist. Two API calls per student, so it runs in a
-    pool; serially this takes a minute for a class of thirty.
+
+def divergence(tmpl: dict, tree: dict | None) -> dict | None:
+    """How far this tree has moved from the template."""
+    if not tree:
+        return None
+    mod = {p for p in tmpl if p in tree and tree[p] != tmpl[p]}
+    new = {p for p in tree if p not in tmpl}
+    gone = {p for p in tmpl if p not in tree}
+    return {"files": len(tree), "mod": mod, "new": new, "gone": gone,
+            "own": (new | mod) - LAB_NOISE}
+
+
+def compose_services_of(repo: str, ref: str) -> dict | None:
+    text = compose_for(repo, ref)
+    return compose_services(text) if text else None
+
+
+def gather(repos: list[str]) -> dict[str, dict]:
+    """repo -> {ref: {"tree":…, "svcs":…}} for main and staging, in parallel.
+
+    Three API calls per student per branch is slow serially; a class of thirty
+    takes well over a minute.
     """
     from concurrent.futures import ThreadPoolExecutor
+    jobs = [(r, ref) for r in repos for ref in ("main", "staging")]
 
     def one(job):
         repo, ref = job
-        text = compose_for(repo, ref)
-        return repo, ref, (set(compose_services(text)) if text else None)
+        return repo, ref, {"tree": repo_tree(repo, ref),
+                           "svcs": compose_services_of(repo, ref)}
 
-    jobs = [(r, ref) for r in repos for ref in ("main", "staging")]
     out: dict[str, dict] = {r: {} for r in repos}
     with ThreadPoolExecutor(max_workers=12) as pool:
-        for repo, ref, svcs in pool.map(one, jobs):
-            out[repo][ref] = svcs
+        for repo, ref, data in pool.map(one, jobs):
+            out[repo][ref] = data
     return out
 
 
 # rank, label, colour -- least progress first
 MIGRATION = [
-    (0, "no repo",   C_DIM),
-    (1, "template",  C_DIM),
-    (2, "main only", C_WARN),
-    (3, "staging",   C_WARN),
-    (4, "migrated",  C_OK),
+    (0, "no repo",  C_DIM),
+    (1, "template", C_DIM),
+    (2, "in place", C_WARN),
+    (3, "own svcs", C_OK),
 ]
 MIG_RANK = {lab: r for r, lab, _ in MIGRATION}
 MIG_COLOUR = {lab: c for _, lab, c in MIGRATION}
 
 
-def migration_state(shape: dict | None) -> tuple[str, set]:
-    """(label, the service set that best represents their work)."""
-    if not shape or (shape.get("main") is None and shape.get("staging") is None):
-        return "no repo", set()
-    main, stg = shape.get("main"), shape.get("staging")
-    own = lambda sv: sv is not None and bool(sv - STOCK)
-    if own(main) and own(stg):
-        return "migrated", stg
-    if own(stg):
-        return "staging", stg
-    if own(main):
-        return "main only", main
-    return "template", (stg or main or set())
+def migration_state(tmpl: dict, data: dict | None) -> tuple[str, dict]:
+    """(label, per-branch divergence) for one student's repo.
+
+    "in place" is the case service names miss entirely: their own code is in
+    the repo, but the compose services are still the template's names.
+    """
+    if not data:
+        return "no repo", {}
+    div = {ref: divergence(tmpl, data.get(ref, {}).get("tree"))
+           for ref in ("main", "staging")}
+    if all(v is None for v in div.values()):
+        return "no repo", div
+    own = any(v and v["own"] for v in div.values())
+    if not own:
+        return "template", div
+    names = set()
+    for ref in ("main", "staging"):
+        names |= set(data.get(ref, {}).get("svcs") or ())
+    return ("own svcs" if names - STOCK else "in place"), div
+
+
+BRANCH_OF = {"production": "main", "staging": "staging"}
+
+
+def project_verdict(apps_for_team, tmpl, data, div, running, colliding, codes):
+    """(working, [blockers]) -- is their own project actually serving users?
+
+    Deliberately ends at HTTP: a compose file can look wrong and still route
+    (Coolify keeps the Traefik label once a domain is set in the UI, whatever
+    the file says), so the URL answering is the only claim worth making.
+    """
+    problems = []
+    if not any(v and v["own"] for v in div.values()):
+        problems.append("still the stock template")
+    elif not (div.get("main") and div["main"]["own"]):
+        problems.append("main still on the template")
+    elif not (div.get("staging") and div["staging"]["own"]):
+        problems.append("staging still on the template")
+
+    for env in ("staging", "production"):
+        rows = [a for a in apps_for_team if a["env"] == env and a["uuid"]]
+        if not rows:
+            problems.append(f"no {env} application")
+            continue
+        for r in rows:
+            doms = real_domains(r["domains"])
+            if not doms:
+                problems.append(f"{env}: no domain set")
+            if r["uuid"] in colliding:
+                problems.append(f"{env}: duplicate domain")
+            if not running.get(r["uuid"]):
+                problems.append(f"{env}: nothing running")
+            svcs = (data or {}).get(BRANCH_OF[env], {}).get("svcs")
+            for _svc, raw, why in malformed_domains(r["domains"]):
+                problems.append(f"{env}: domain typed wrong ({why.split(' —')[0]})")
+            for svc, host in doms:
+                code = codes.get(host_only(host), "---")
+                if not code.startswith(("2", "3")):
+                    problems.append(f"{env}: {host_only(host)} -> {code}")
+                if svcs and svc not in svcs:
+                    problems.append(
+                        f"{env}: domain on '{svc}', not a service on "
+                        f"{BRANCH_OF[env]}")
+
+    seen, uniq = set(), []
+    for x in problems:
+        if x not in seen:
+            seen.add(x)
+            uniq.append(x)
+    return (not uniq), uniq
 
 
 def project_view(apps, running):
@@ -420,15 +645,13 @@ def project_view(apps, running):
         teams.setdefault(a["team"], []).append(a)
 
     people = roster()
-    if people:
-        teams = {t: v for t, v in teams.items() if t in people}
-    else:
-        people = {}
+    teams = {t: v for t, v in teams.items() if t in people} if people else teams
+    people = people or {}
 
-    # The Coolify project name is normally the repo name -- but a student with
-    # a hand-made project ("Product management tool") breaks that, and one with
-    # no project at all still has a repo. So collect every candidate per team
-    # and keep whichever actually yields a compose file.
+    # The Coolify project name is normally the repo name -- but a student with a
+    # hand-made project ("Product management tool") breaks that, and one with no
+    # project at all still has a repo. Collect every candidate and keep whichever
+    # actually resolves.
     owners = repo_owners()
     cands: dict[str, list[str]] = {}
     for team, rows in teams.items():
@@ -441,73 +664,111 @@ def project_view(apps, running):
             seen.append(owners[gh])
         cands[team] = seen
 
-    shapes = project_shapes(sorted({c for v in cands.values() for c in v}))
+    tmpl = repo_tree(TEMPLATE_REPO, "main")
+    if not tmpl:
+        print(f"Could not read the template tree from {ORG}/{TEMPLATE_REPO}.")
+        return
+    data = gather(sorted({c for v in cands.values() for c in v}))
+
+    coll = domain_collisions(apps)
+    colliding = {c["uuid"] for claims in coll.values() for c in claims}
+
+    # Ground truth, fetched once per hostname.
+    from concurrent.futures import ThreadPoolExecutor
+    hosts = sorted({host_only(h) for a in apps if a["uuid"]
+                    for _s, h in real_domains(a["domains"])})
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        codes = dict(zip(hosts, pool.map(lambda h: http(f"http://{h}/"), hosts)))
 
     rows = []
     for team, apps_for_team in teams.items():
-        st, napps, ndom, dep, up, last = classify(apps_for_team, running)
-        # Best candidate = the one showing the most migration progress; a repo
-        # whose compose could not be read ranks last and only wins if it is all
-        # there is.
-        best = max(cands[team] or [""],
-                   key=lambda c: MIG_RANK[migration_state(shapes.get(c))[0]])
-        repo = best
-        mig, svcs = migration_state(shapes.get(repo))
-        lab_done = st == "LIVE"
+        best, best_state, best_div = "", "no repo", {}
+        for c in cands[team] or [""]:
+            st, dv = migration_state(tmpl, data.get(c))
+            if MIG_RANK[st] >= MIG_RANK[best_state]:
+                best, best_state, best_div = c, st, dv
+        lab, napps, *_ = classify(apps_for_team, running)
+        working, blockers = project_verdict(
+            apps_for_team, tmpl, data.get(best), best_div, running,
+            colliding, codes)
+        stg = best_div.get("staging") or best_div.get("main")
         rows.append({
-            "team": team, "lab": st, "lab_done": lab_done, "napps": napps,
-            "mig": mig, "svcs": svcs, "repo": repo,
+            "team": team, "repo": best, "mig": best_state, "div": best_div,
+            "lab": lab, "lab_done": lab == "LIVE", "napps": napps,
+            "working": working, "blockers": blockers,
+            "own": len(stg["own"]) if stg else 0,
+            "new": len(stg["new"]) if stg else 0,
+            "gone": len(stg["gone"]) if stg else 0,
         })
 
-    # Sort: everyone still inside the lab first (they cannot migrate yet),
-    # then by how far the migration has actually got.
-    rows.sort(key=lambda r: (r["lab_done"], MIG_RANK[r["mig"]], r["team"]))
+    rows.sort(key=lambda r: (r["working"], MIG_RANK[r["mig"]], -r["own"],
+                             r["team"]))
 
-    print(f"\n{C_B}{'STUDENT':<31}{'LAB':<14}{'PROJECT':<11}{'APPS':>5}  "
-          f"STAGING SERVICES{C_Z}")
+    print(f"\n{C_B}{'STUDENT':<28}{'PROJECT':<10}{'FILES':<14}{'STEP 13':<9}"
+          f"IN THE WAY{C_Z}")
     print("─" * 88)
     prev = None
     for r in rows:
-        key = (r["lab_done"], r["mig"])
+        key = (r["working"], r["mig"])
         if prev is not None and key != prev:
             print()
         prev = key
-        name = r["team"].replace("'s Sandbox", "")[:30]
-        lab_c = C_OK if r["lab_done"] else C_WARN
-        mig_c = MIG_COLOUR[r["mig"]]
-        app_c = "" if r["napps"] == 2 else C_WARN
-        svcs = ", ".join(sorted(r["svcs"])) if r["svcs"] else ""
-        if len(svcs) > 30:
-            svcs = svcs[:29] + "…"
-        print(f"{name:<31}{lab_c}{r['lab']:<14}{C_Z}{mig_c}{r['mig']:<11}{C_Z}"
-              f"{app_c}{r['napps']:>5}{C_Z}  {C_DIM}{svcs}{C_Z}")
+        bits = []
+        if r["new"]:
+            bits.append(f"+{r['new']}")
+        if r["own"]:
+            bits.append(f"~{r['own']}")
+        if r["gone"]:
+            bits.append(f"-{r['gone']}")
+        files = " ".join(bits)   # never truncate: "-12" cut to "-1" misleads
+        verdict, vc = ("working", C_OK) if r["working"] else ("no", C_DIM)
+        tail = "" if r["working"] else "; ".join(r["blockers"][:2])
+        if len(tail) > 27:
+            tail = tail[:26] + "…"
+        print(f"{r['team'].replace(SUFFIX, '')[:27]:<28}"
+              f"{MIG_COLOUR[r['mig']]}{r['mig']:<10}{C_Z}"
+              f"{C_DIM}{files:<14}{C_Z}{vc}{verdict:<9}{C_Z}{C_DIM}{tail}{C_Z}")
 
     print("─" * 88)
+    print(f"{C_DIM}FILES: +new ~changed -deleted, against the template"
+          f" (blob SHAs, so renames and in-place rewrites both show){C_Z}")
+
+    good = [r for r in rows if r["working"]]
+    print(f"\n{C_B}{len(good)} of {len(rows)} have a working project{C_Z}"
+          f"{C_DIM} — own code on both branches, both environments running,"
+          f" both URLs answering{C_Z}")
+    for r in good:
+        print(f"  {C_OK}✓{C_Z} {r['team'].replace(SUFFIX, ''):<27}"
+              f"{C_DIM}{r['repo']}{C_Z}")
+
     counts = {}
     for r in rows:
         counts[r["mig"]] = counts.get(r["mig"], 0) + 1
-    print(f"{len(rows)} students — step 13 progress")
     blurb = {
-        "migrated":  "own services on both branches",
-        "staging":   "own services on staging, main still template",
-        "main only": "own services on main but not staging — out of order",
-        "template":  "still the stock hello/time/db template",
-        "no repo":   "no readable docker-compose.yaml",
+        "own svcs": "own code, services renamed",
+        "in place": "own code, still using the template's service names",
+        "template": "nothing beyond the lab's own edits",
+        "no repo":  "no readable repository",
     }
+    print(f"\n{C_B}whose code is in the repo{C_Z}")
     for _, lab, c in MIGRATION[::-1]:
         if counts.get(lab):
-            print(f"  {counts[lab]:>3} {c}{lab:<11}{C_Z}{C_DIM}{blurb[lab]}{C_Z}")
-    not_through = [r for r in rows if not r["lab_done"]]
-    if not_through:
-        print(f"\n{C_WARN}{len(not_through)} have not finished the lab yet{C_Z}"
-              f"{C_DIM} — they cannot start step 13{C_Z}")
-    odd = [r for r in rows if r["napps"] != 2]
-    if odd:
-        print(f"{C_WARN}{len(odd)} with an application count other than 2{C_Z}"
-              f"{C_DIM} — stray or duplicate apps{C_Z}")
-        for r in odd:
-            print(f"      {r['team'].replace(chr(39)+'s Sandbox',''):<28}"
-                  f"{r['napps']} apps")
+            print(f"  {counts[lab]:>3} {c}{lab:<10}{C_Z}{C_DIM}{blurb[lab]}{C_Z}")
+
+    started = [r for r in rows if r["mig"] in ("in place", "own svcs")]
+    if started:
+        print(f"\n{C_B}{len(started)} have started their own project{C_Z}"
+              f"{C_DIM} — most-changed first{C_Z}")
+        for r in sorted(started, key=lambda x: -x["own"])[:12]:
+            plural = "file" if r["own"] == 1 else "files"
+            print(f"  {r['team'].replace(SUFFIX, '')[:27]:<28}"
+                  f"{C_DIM}{r['own']:>3} {plural} of their own, "
+                  f"{r['new']} new, {r['gone']} template files deleted{C_Z}")
+
+    nt = [r for r in rows if not r["lab_done"]]
+    if nt:
+        print(f"\n{C_WARN}{len(nt)} have not finished the lab{C_Z}"
+              f"{C_DIM}: {', '.join(r['team'].replace(SUFFIX, '') for r in nt)}{C_Z}")
 
 
 def ok(msg):   print(f"  {C_OK}ok  {C_Z} {msg}")
@@ -556,9 +817,15 @@ def deep_dive(needle, apps, running):
         print(f"\n  {C_B}{r['env']}{C_Z}  branch={r['branch'] or '?'}  uuid={r['uuid']}")
         print(f"       status={r['status'] or '?'}  deploys={r['ndeploys']}  last={r['last'] or 'never'}")
         doms = real_domains(r["domains"])
+        bogus = {(svc, raw) for svc, raw, _ in malformed_domains(r["domains"])}
         if doms:
             for svc, host in doms:
+                if any(svc == bs and host in br for bs, br in bogus):
+                    continue
                 ok(f"domain {host}  -> service '{svc}'")
+            for svc, raw, why in malformed_domains(r["domains"]):
+                bad(f"domain {raw!r} on '{svc}' cannot route")
+                note(why)
         else:
             bad("no real domain set — only Coolify's sslip.io placeholder, if any")
             note("lab step 10; Traefik has no route until this is done")
@@ -573,6 +840,16 @@ def deep_dive(needle, apps, running):
             note("never deployed")
         for svc, host in doms:
             print(f"       http://{host}/health -> {http(f'http://{host}/health')}")
+
+    # --- the same URL on two applications. Invisible otherwise: both deploy,
+    # both look healthy, and one environment quietly serves the other.
+    coll = domain_collisions(apps)
+    mine = {h: c for h, c in coll.items() if any(x["team"] == team for x in c)}
+    if mine:
+        print(f"\n  {C_B}duplicate domains{C_Z}")
+        collision_report(mine, only_team=team)
+        note("staging and production must have different hostnames (lab step 10)")
+        note("fix in Coolify: Access -> gear on the wrong domain -> edit, then Redeploy")
 
     # --- compose analysis, the part that explains "deployed then died"
     repo = project
