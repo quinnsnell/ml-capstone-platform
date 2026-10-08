@@ -358,6 +358,158 @@ def compose_services(text: str) -> dict[str, dict]:
     return svcs
 
 
+# ------------------------------------------------- step 13: their own project
+# The lab ends with the stock template deployed. The real assignment is to
+# replace it with their own project, which is visible in the compose file: the
+# template's services are `hello`, `time` and `db`, so anything else is theirs.
+STOCK = {"hello", "time", "db"}
+
+
+def project_shapes(repos: list[str]) -> dict[str, dict]:
+    """repo -> {"main": set|None, "staging": set|None} of compose service names.
+
+    None means the file could not be read on that branch -- missing, renamed,
+    or the branch does not exist. Two API calls per student, so it runs in a
+    pool; serially this takes a minute for a class of thirty.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(job):
+        repo, ref = job
+        text = compose_for(repo, ref)
+        return repo, ref, (set(compose_services(text)) if text else None)
+
+    jobs = [(r, ref) for r in repos for ref in ("main", "staging")]
+    out: dict[str, dict] = {r: {} for r in repos}
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        for repo, ref, svcs in pool.map(one, jobs):
+            out[repo][ref] = svcs
+    return out
+
+
+# rank, label, colour -- least progress first
+MIGRATION = [
+    (0, "no repo",   C_DIM),
+    (1, "template",  C_DIM),
+    (2, "main only", C_WARN),
+    (3, "staging",   C_WARN),
+    (4, "migrated",  C_OK),
+]
+MIG_RANK = {lab: r for r, lab, _ in MIGRATION}
+MIG_COLOUR = {lab: c for _, lab, c in MIGRATION}
+
+
+def migration_state(shape: dict | None) -> tuple[str, set]:
+    """(label, the service set that best represents their work)."""
+    if not shape or (shape.get("main") is None and shape.get("staging") is None):
+        return "no repo", set()
+    main, stg = shape.get("main"), shape.get("staging")
+    own = lambda sv: sv is not None and bool(sv - STOCK)
+    if own(main) and own(stg):
+        return "migrated", stg
+    if own(stg):
+        return "staging", stg
+    if own(main):
+        return "main only", main
+    return "template", (stg or main or set())
+
+
+def project_view(apps, running):
+    teams: dict[str, list[dict]] = {}
+    for a in apps:
+        teams.setdefault(a["team"], []).append(a)
+
+    people = roster()
+    if people:
+        teams = {t: v for t, v in teams.items() if t in people}
+    else:
+        people = {}
+
+    # The Coolify project name is normally the repo name -- but a student with
+    # a hand-made project ("Product management tool") breaks that, and one with
+    # no project at all still has a repo. So collect every candidate per team
+    # and keep whichever actually yields a compose file.
+    owners = repo_owners()
+    cands: dict[str, list[str]] = {}
+    for team, rows in teams.items():
+        seen = []
+        for r in rows:
+            if r["project"] and r["project"] not in seen:
+                seen.append(r["project"])
+        gh = (people.get(team, {}).get("github_username") or "").lower()
+        if owners.get(gh) and owners[gh] not in seen:
+            seen.append(owners[gh])
+        cands[team] = seen
+
+    shapes = project_shapes(sorted({c for v in cands.values() for c in v}))
+
+    rows = []
+    for team, apps_for_team in teams.items():
+        st, napps, ndom, dep, up, last = classify(apps_for_team, running)
+        # Best candidate = the one showing the most migration progress; a repo
+        # whose compose could not be read ranks last and only wins if it is all
+        # there is.
+        best = max(cands[team] or [""],
+                   key=lambda c: MIG_RANK[migration_state(shapes.get(c))[0]])
+        repo = best
+        mig, svcs = migration_state(shapes.get(repo))
+        lab_done = st == "LIVE"
+        rows.append({
+            "team": team, "lab": st, "lab_done": lab_done, "napps": napps,
+            "mig": mig, "svcs": svcs, "repo": repo,
+        })
+
+    # Sort: everyone still inside the lab first (they cannot migrate yet),
+    # then by how far the migration has actually got.
+    rows.sort(key=lambda r: (r["lab_done"], MIG_RANK[r["mig"]], r["team"]))
+
+    print(f"\n{C_B}{'STUDENT':<31}{'LAB':<14}{'PROJECT':<11}{'APPS':>5}  "
+          f"STAGING SERVICES{C_Z}")
+    print("─" * 88)
+    prev = None
+    for r in rows:
+        key = (r["lab_done"], r["mig"])
+        if prev is not None and key != prev:
+            print()
+        prev = key
+        name = r["team"].replace("'s Sandbox", "")[:30]
+        lab_c = C_OK if r["lab_done"] else C_WARN
+        mig_c = MIG_COLOUR[r["mig"]]
+        app_c = "" if r["napps"] == 2 else C_WARN
+        svcs = ", ".join(sorted(r["svcs"])) if r["svcs"] else ""
+        if len(svcs) > 30:
+            svcs = svcs[:29] + "…"
+        print(f"{name:<31}{lab_c}{r['lab']:<14}{C_Z}{mig_c}{r['mig']:<11}{C_Z}"
+              f"{app_c}{r['napps']:>5}{C_Z}  {C_DIM}{svcs}{C_Z}")
+
+    print("─" * 88)
+    counts = {}
+    for r in rows:
+        counts[r["mig"]] = counts.get(r["mig"], 0) + 1
+    print(f"{len(rows)} students — step 13 progress")
+    blurb = {
+        "migrated":  "own services on both branches",
+        "staging":   "own services on staging, main still template",
+        "main only": "own services on main but not staging — out of order",
+        "template":  "still the stock hello/time/db template",
+        "no repo":   "no readable docker-compose.yaml",
+    }
+    for _, lab, c in MIGRATION[::-1]:
+        if counts.get(lab):
+            print(f"  {counts[lab]:>3} {c}{lab:<11}{C_Z}{C_DIM}{blurb[lab]}{C_Z}")
+    not_through = [r for r in rows if not r["lab_done"]]
+    if not_through:
+        print(f"\n{C_WARN}{len(not_through)} have not finished the lab yet{C_Z}"
+              f"{C_DIM} — they cannot start step 13{C_Z}")
+    odd = [r for r in rows if r["napps"] != 2]
+    if odd:
+        print(f"{C_WARN}{len(odd)} with an application count other than 2{C_Z}"
+              f"{C_DIM} — stray or duplicate apps{C_Z}")
+        for r in odd:
+            print(f"      {r['team'].replace(chr(39)+'s Sandbox',''):<28}"
+                  f"{r['napps']} apps")
+
+
 def ok(msg):   print(f"  {C_OK}ok  {C_Z} {msg}")
 def bad(msg):  print(f"  {C_BAD}FAIL{C_Z} {msg}")
 def warn(msg): print(f"  {C_WARN}warn{C_Z} {msg}")
@@ -480,6 +632,9 @@ def main():
     ap.add_argument("student", nargs="?", help="name, team or project substring")
     ap.add_argument("--all", action="store_true",
                     help="list every student as a row, including LIVE and not-started")
+    ap.add_argument("--project", action="store_true",
+                    help="step 13 view: has each student replaced the template "
+                         "with their own project?")
     args = ap.parse_args()
 
     apps = fetch_apps()
@@ -489,6 +644,8 @@ def main():
     running = containers()
     if args.student:
         deep_dive(args.student, apps, running)
+    elif args.project:
+        project_view(apps, running)
     else:
         overview(apps, running, show_all=args.all)
 
