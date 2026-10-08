@@ -701,9 +701,18 @@ def project_view(apps, running):
             "gone": len(stg["gone"]) if stg else 0,
         })
 
-    rows.sort(key=lambda r: (r["working"], MIG_RANK[r["mig"]], -r["own"],
+    # Working first: it is the question this view answers, and a terminal that
+    # truncates keeps the top. Then most-changed first, so the people closest
+    # to a working project come before the untouched template.
+    rows.sort(key=lambda r: (not r["working"], -MIG_RANK[r["mig"]], -r["own"],
                              r["team"]))
 
+    good = [r for r in rows if r["working"]]
+    started = [r for r in rows if r["mig"] in ("in place", "own svcs")]
+    print(f"\n{C_B}Step 13 — their own project{C_Z}   "
+          f"{C_OK}{len(good)} working{C_Z}{C_DIM} · {C_Z}"
+          f"{C_WARN}{len(started)} started{C_Z}{C_DIM} · "
+          f"{len(rows) - len(started)} still the template{C_Z}")
     print(f"\n{C_B}{'STUDENT':<28}{'PROJECT':<10}{'FILES':<14}{'STEP 13':<9}"
           f"IN THE WAY{C_Z}")
     print("─" * 88)
@@ -730,40 +739,15 @@ def project_view(apps, running):
               f"{C_DIM}{files:<14}{C_Z}{vc}{verdict:<9}{C_Z}{C_DIM}{tail}{C_Z}")
 
     print("─" * 88)
-    print(f"{C_DIM}FILES: +new ~changed -deleted, against the template"
-          f" (blob SHAs, so renames and in-place rewrites both show){C_Z}")
+    print(f"{C_DIM}FILES: +new ~changed -deleted against the template, by blob"
+          f" SHA — so in-place rewrites show too{C_Z}")
 
-    good = [r for r in rows if r["working"]]
-    print(f"\n{C_B}{len(good)} of {len(rows)} have a working project{C_Z}"
-          f"{C_DIM} — own code on both branches, both environments running,"
-          f" both URLs answering{C_Z}")
-    for r in good:
-        print(f"  {C_OK}✓{C_Z} {r['team'].replace(SUFFIX, ''):<27}"
-              f"{C_DIM}{r['repo']}{C_Z}")
-
-    counts = {}
-    for r in rows:
-        counts[r["mig"]] = counts.get(r["mig"], 0) + 1
-    blurb = {
-        "own svcs": "own code, services renamed",
-        "in place": "own code, still using the template's service names",
-        "template": "nothing beyond the lab's own edits",
-        "no repo":  "no readable repository",
-    }
-    print(f"\n{C_B}whose code is in the repo{C_Z}")
-    for _, lab, c in MIGRATION[::-1]:
-        if counts.get(lab):
-            print(f"  {counts[lab]:>3} {c}{lab:<10}{C_Z}{C_DIM}{blurb[lab]}{C_Z}")
-
-    started = [r for r in rows if r["mig"] in ("in place", "own svcs")]
-    if started:
-        print(f"\n{C_B}{len(started)} have started their own project{C_Z}"
-              f"{C_DIM} — most-changed first{C_Z}")
-        for r in sorted(started, key=lambda x: -x["own"])[:12]:
-            plural = "file" if r["own"] == 1 else "files"
-            print(f"  {r['team'].replace(SUFFIX, '')[:27]:<28}"
-                  f"{C_DIM}{r['own']:>3} {plural} of their own, "
-                  f"{r['new']} new, {r['gone']} template files deleted{C_Z}")
+    if good:
+        print(f"\n{C_B}Working projects{C_Z}{C_DIM} — own code on both branches,"
+              f" both environments running, both URLs answering{C_Z}")
+        for r in good:
+            print(f"  {C_OK}✓{C_Z} {r['team'].replace(SUFFIX, ''):<27}"
+                  f"{C_DIM}{r['repo']}{C_Z}")
 
     nt = [r for r in rows if not r["lab_done"]]
     if nt:
