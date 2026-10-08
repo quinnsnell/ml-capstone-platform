@@ -653,6 +653,64 @@ Something like `/health` that returns 200 when the app can actually work — it 
 reach the database, it can reach the service it depends on. It is what your health
 check tests and therefore what decides whether a deploy reaches users.
 
+### 6. Have one URL that exercises the whole stack, and test *that*
+
+`/health` and the home page are both answerable by a frontend that has completely
+lost its backend. Loading them proves a port is open, nothing more — which is why
+"it works, I checked the page" and "the app is broken" are regularly both true at
+once.
+
+So pick a single request that **cannot** be answered without the backend querying
+the database, and make that your real test. Write a row, then read it back:
+
+```bash
+# Replace these with your project's actual routes — the shape is the point.
+# Each one has to reach the database to produce an answer.
+
+# a search or list page the frontend renders from db rows
+curl -fsS "http://localhost:8080/search?q=test&limit=5"
+
+# a detail page that must look a record up by id
+curl -fsS "http://localhost:8080/items/1"
+
+# a write, then a read proving it actually landed
+curl -fsS -X POST "http://localhost:8080/api/items" \
+     -H 'Content-Type: application/json' -d '{"name":"smoke-test"}'
+curl -fsS "http://localhost:8080/api/items" | grep smoke-test
+
+# an inference route that records its prediction
+curl -fsS -X POST "http://localhost:8080/api/predict" \
+     -H 'Content-Type: application/json' -d '{"text":"this was great"}'
+curl -fsS "http://localhost:8080/api/predictions" | grep 'this was great'
+```
+
+This is what `./smoke-test.sh` does with `/notes` in the template: a `POST` that
+writes and a `GET` that reads back. Keep that pair when you rewrite it for your own
+endpoints and put it last, so a failure is unambiguous. If every route you can think
+of answers without touching the database, you do not yet have a test that would
+catch a broken deployment — add one.
+
+Two places to run it, and the second is the one that finds real problems:
+
+```bash
+# locally, after docker compose up
+curl -fsS "http://localhost:8080/api/items" | grep smoke-test
+
+# against the deployed app, on the CS VPN — same path, your staging hostname
+curl -fsS "http://staging-yourapp.ml-capstone.cs.byu.edu/api/items" | grep smoke-test
+```
+
+The deployed run is not the same run. Coolify ignores
+`docker-compose.override.yml` — so a database URL, API base, or credential that only
+exists in your override file is simply absent in production, and anything pointing at
+`localhost` resolves to the container itself rather than to `db`. Your frontend keeps
+serving pages either way, because it does not need any of that to render HTML. Only a
+request that has to reach the database tells you which run you are looking at.
+
+And do it again after the containers restart. A row that disappears on restart means
+your database has no named volume, which is a problem you want to find before your
+users do, not after.
+
 ### Keep the two branches the same shape
 
 Restructure on `staging`, get it working, *then* promote. If `staging` defines
@@ -675,6 +733,9 @@ disagree.
 - [ ] `${SERVICE_FQDN_<SERVICE>}` matches the public service's name
 - [ ] no `SERVICE_FQDN` on internal services
 - [ ] `./smoke-test.sh` (or your own equivalent) passes locally
+- [ ] one request that needs the database answers correctly — locally *and* against
+      the deployed hostname, not just `/health`
+- [ ] that written row is still there after `docker compose down && up`
 - [ ] after deploying: re-attach the domain in Coolify for **both** environments
 - [ ] after that: redeploy, then load both URLs
 
@@ -695,6 +756,7 @@ disagree.
 | Deploy ran but version unchanged | health check failed; Coolify kept the old container |
 | Deployed fine, then died hours later | a service in your compose file has no `healthcheck:` |
 | Restructured, now the URL 404s | the domain is still attached to the old service name — section 13 |
+| Pages load but data pages error or come back empty | the backend cannot reach the database on the deployed host — section 13, item 6 |
 
 Fuller answers in [`troubleshooting.md`](troubleshooting.md).
 
