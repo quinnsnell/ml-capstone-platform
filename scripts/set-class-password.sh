@@ -155,9 +155,20 @@ fi
 # ---- obtain the password ------------------------------------------------
 PASSWORD=""
 if [[ $GENERATE -eq 1 ]]; then
-    # Ambiguous characters removed: this gets typed by hand into a modal.
-    PASSWORD=$(LC_ALL=C tr -dc 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789' \
-                 < /dev/urandom | head -c 16)
+    # A class password gets read aloud, written on a whiteboard, and typed by
+    # thirty people. A random 16-char string fails all three. Three common
+    # words plus two digits is easy to dictate and still far beyond guessing
+    # for a VPN-only service that is not internet-reachable.
+    WORDS=(anchor amber arbor aspen basin beacon birch bison bramble breeze
+           cactus canyon cedar cinder cobalt copper coral cove crimson delta
+           dune ember fathom fern flint forge garnet glacier granite harbor
+           hollow indigo ivory juniper kelp lantern ledge lichen lumen maple
+           marble meadow mesa mica nectar oasis onyx orchid otter pebble
+           pewter pine prairie quartz quill ridge rill ripple saffron sage
+           sandbar sequoia shale slate solstice spruce summit thicket thistle
+           tidal timber tundra umber valley verdant vellum willow zenith)
+    pick() { printf '%s' "${WORDS[$(( $(od -An -N4 -tu4 < /dev/urandom | tr -d ' ') % ${#WORDS[@]} ))]}"; }
+    PASSWORD="$(pick)-$(pick)-$(pick)-$(( $(od -An -N2 -tu2 < /dev/urandom | tr -d ' ') % 90 + 10 ))"
 elif [[ -n "${CLASS_PASSWORD:-}" ]]; then
     PASSWORD="$CLASS_PASSWORD"
     echo "  Password source:  \$CLASS_PASSWORD environment variable"
