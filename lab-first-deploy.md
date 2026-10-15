@@ -599,6 +599,10 @@ the data, and a `db`. You can throw away everything inside `frontend/` and
 languages, the frameworks, the Dockerfiles, the dependencies, the endpoints. None
 of that is special.
 
+> **Moving to your group project?** [`group-project.md`](group-project.md) walks
+> through copying one member's repo into a group repo, pointing Terraform at the
+> group's Coolify team, and deploying it as the group's project.
+>
 > **Migrating an existing project?** [`migrating-your-project.md`](migrating-your-project.md)
 > states these requirements in a form you can hand to Codex or another coding
 > agent along with your repo, so it can do the conversion and verify it. Read the
