@@ -53,6 +53,10 @@
 #                                               # Falls back to $OPERATOR_EMAIL env var.
 #                                               # Set OPERATOR_EMAIL in your rigel shell
 #                                               # profile to make this automatic.
+#   ./provision-teams.sh --keep-passwords       # never rewrite an existing user's
+#                                               # password. New users still get
+#                                               # CLASS_PASSWORD. Use this when adding
+#                                               # existing students to new teams.
 #   ./provision-teams.sh --class-password <pw>  # set Coolify password for every user.
 #                                               # Needed because Coolify's UI destructive-
 #                                               # action modals prompt for a password even
@@ -100,6 +104,11 @@ OBSERVER_EMAIL="${OPERATOR_EMAIL:-}"
 # placeholder; a loud warning is printed if unchanged.
 CLASS_PASSWORD="${CLASS_PASSWORD:-capstone-changeme}"
 
+# When set, existing users are left completely alone -- their password hash is
+# not rewritten. New users are still created with CLASS_PASSWORD. Use this for
+# the group phase, where every student already exists.
+KEEP_PASSWORDS=0
+
 # Coolify major.minor versions this script has been proven against. New minors
 # are likely fine but flag them so the operator can decide. Space-separated
 # list; each entry matches "<entry>.*" (e.g. "4.2" matches 4.2.0, 4.2.7, ...).
@@ -116,6 +125,7 @@ while [[ $# -gt 0 ]]; do
         --roster)        ROSTER="$2"; shift 2 ;;
         --observer)      OBSERVER_EMAIL="$2"; shift 2 ;;
         --class-password) CLASS_PASSWORD="$2"; shift 2 ;;
+        --keep-passwords) KEEP_PASSWORDS=1; shift ;;
         --check-schema)  CHECK_SCHEMA=1; shift ;;
         --show-sql)      SHOW_SQL=1; shift ;;
         -h|--help)       usage ;;
@@ -241,7 +251,41 @@ common_banner_end
 # See the CLASS_PASSWORD comment above the argument parser for why we seed a
 # known password rather than a random placeholder. Warn loudly if the default
 # is still in use so an instructor doesn't accidentally ship it to students.
-if [[ "$CLASS_PASSWORD" == "capstone-changeme" ]]; then
+if [[ $KEEP_PASSWORDS -eq 1 ]]; then
+    USERS_CONFLICT_CLAUSE='ON CONFLICT (email) DO NOTHING;'
+else
+    USERS_CONFLICT_CLAUSE=$'ON CONFLICT (email) DO UPDATE\n    SET password   = EXCLUDED.password,\n        updated_at = NOW();'
+fi
+
+if [[ $KEEP_PASSWORDS -eq 1 ]]; then
+    echo "  Passwords:        existing users left untouched (--keep-passwords)"
+fi
+
+# The default is a placeholder published in this PUBLIC repo. Writing it into
+# user rows gives every account a password anyone can look up, and Coolify's
+# login form accepts email+password for existing accounts even with
+# registration disabled -- so a known password plus a known student email is an
+# account takeover for anyone who can reach the VPN. Refuse to apply with it.
+if [[ $APPLY -eq 1 && $KEEP_PASSWORDS -eq 0 \
+      && "$CLASS_PASSWORD" == "capstone-changeme" ]]; then
+    cat >&2 <<'ABORT'
+ERROR: refusing to --apply with the default class password.
+
+  'capstone-changeme' is the placeholder in this script, which lives in a
+  PUBLIC repository. Applying it would set every provisioned account to a
+  password anyone can read, and Coolify's login form accepts email+password
+  for accounts that already exist.
+
+  Pick one:
+    --class-password '<value>'   set a real password (do NOT commit the value)
+    --keep-passwords             leave existing users' passwords alone
+                                 (correct when adding existing students to
+                                 new teams -- the group phase)
+ABORT
+    exit 2
+fi
+
+if [[ "$CLASS_PASSWORD" == "capstone-changeme" && $KEEP_PASSWORDS -eq 0 ]]; then
     echo "WARNING: using default class password 'capstone-changeme'." >&2
     echo "         Override with --class-password <value> or CLASS_PASSWORD env var." >&2
     echo "         The default is intended as an obvious placeholder, not to ship." >&2
@@ -468,11 +512,14 @@ has_line() { grep -qxF -- "$2" <<<"$1"; }
 -- --class-password rotates the password for existing users too. Students
 -- who set their own password via the UI would lose that override on re-run;
 -- document the tradeoff or coordinate class-wide reruns accordingly.
+--
+-- --keep-passwords switches this to DO NOTHING. Needed when adding EXISTING
+-- students to NEW teams (the group phase): those users already exist, nothing
+-- about them should change, and rewriting their hash to whatever
+-- --class-password happens to be would silently reset 30 accounts.
 INSERT INTO users (name, email, email_verified_at, password, created_at, updated_at)
 VALUES ('$e_name', '$e_email', NOW(), '$CLASS_PASSWORD_HASH', NOW(), NOW())
-ON CONFLICT (email) DO UPDATE
-    SET password   = EXCLUDED.password,
-        updated_at = NOW();
+$USERS_CONFLICT_CLAUSE
 
 INSERT INTO teams (name, description, personal_team, created_at, updated_at)
 SELECT '$e_team_name', 'Provisioned by provision-teams.sh${e_gh:+ (github=$e_gh)}', false, NOW(), NOW()

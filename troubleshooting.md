@@ -239,7 +239,7 @@ The `coolify_application` resources in `terraform/main.tf` need a specific patch
 
 ### Coolify UI asks for a password when I try to delete something
 
-Coolify's UI prompts for your password on destructive-action confirmations (Delete Application, Delete Project, etc.) even when your session is authenticated via GitHub OAuth. Your instructor set a **class-wide Coolify password** during provisioning — ask them for it and type it into the modal.
+Coolify's UI prompts for your password on destructive-action confirmations (Delete Application, Delete Project, etc.) even when your session is authenticated via GitHub OAuth. Your instructor set a **class-wide Coolify password** during provisioning — ask them for it and type it into the modal. It is deliberately not written down in these docs, which are public; it is posted where only the class can see it.
 
 If you forget the password AND you have your `COOLIFY_API_TOKEN` from Setup Step 8, you can bypass the UI entirely and delete resources via the API:
 

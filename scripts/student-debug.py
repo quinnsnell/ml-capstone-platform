@@ -50,18 +50,61 @@ def sql(query: str) -> list[list[str]]:
     return [l.split("~") for l in out.splitlines() if l.strip() and "~" in l]
 
 
+# uuid -> {service: [container port, ...]}, filled in by containers().
+EXPOSED: dict[str, dict[str, list[int]]] = {}
+
+
 def containers() -> dict[str, list[tuple[str, bool]]]:
-    """uuid -> [(service, healthy)] for every running app container."""
-    out = ssh('docker ps --format "{{.Names}}~{{.Status}}"')
+    """uuid -> [(service, healthy)] for every running app container.
+
+    Also records each container's exposed ports in EXPOSED, because a container
+    exposing more than one is a real and otherwise invisible breakage -- see
+    port_problem().
+    """
+    out = ssh('docker ps --format "{{.Names}}~{{.Status}}~{{.Ports}}"')
     found: dict[str, list[tuple[str, bool]]] = {}
+    EXPOSED.clear()
     for line in out.splitlines():
-        if "~" not in line:
+        parts = line.split("~")
+        if len(parts) < 2:
             continue
-        name, status = line.split("~", 1)
+        name, status = parts[0], parts[1]
+        ports = parts[2] if len(parts) > 2 else ""
         m = re.match(r"^([a-z0-9_-]+?)-([a-z0-9]{20,})-\d+$", name)
-        if m:
-            found.setdefault(m.group(2), []).append((m.group(1), "healthy" in status))
+        if not m:
+            continue
+        svc, uuid = m.group(1), m.group(2)
+        found.setdefault(uuid, []).append((svc, "healthy" in status))
+        # "80/tcp, 8000/tcp" or "0.0.0.0:8100->8000/tcp". The container port is
+        # what Traefik connects to, so take the right-hand side of any mapping.
+        cports = []
+        for chunk in ports.split(","):
+            cm = re.search(r"(\d+)/tcp\s*$", chunk.strip())
+            if cm and int(cm.group(1)) not in cports:
+                cports.append(int(cm.group(1)))
+        EXPOSED.setdefault(uuid, {})[svc] = sorted(cports)
     return found
+
+
+def port_problem(uuid: str, svc: str) -> str | None:
+    """Why Traefik cannot work out which port to use, or None if it can.
+
+    Coolify emits a `loadbalancer.server.port` label only for non-Compose
+    applications. For a Compose app, Traefik infers the port from the
+    container's exposed ports -- fine with exactly one, broken with two: it
+    picks one, and if that is not the one being served the URL returns 502
+    while every container still reports healthy.
+
+    The usual cause is a base image with its own EXPOSE. `nginx:alpine` exposes
+    80, so a Dockerfile that adds `EXPOSE 8000` and an nginx.conf that listens
+    on 8000 produces a container advertising both, and Docker has no way to
+    un-expose the inherited one.
+    """
+    ports = EXPOSED.get(uuid, {}).get(svc)
+    if not ports or len(ports) < 2:
+        return None
+    return (f"'{svc}' exposes {len(ports)} ports ({', '.join(map(str, ports))}) "
+            f"-- Traefik cannot choose, expect 502")
 
 
 def placeholder(d: str) -> bool:
@@ -647,6 +690,10 @@ def project_verdict(apps_for_team, data, div, running, colliding, codes):
             svcs = (data or {}).get(BRANCH_OF[env], {}).get("svcs")
             for _svc, raw, why in malformed_domains(r["domains"]):
                 problems.append(f"{env}: domain typed wrong ({why.split(' —')[0]})")
+            for svc, _h in doms:
+                why = port_problem(r["uuid"], svc)
+                if why:
+                    problems.append(f"{env}: {why.split(' --')[0]}")
             for svc, host in doms:
                 code = codes.get(host_only(host), "---")
                 if not code.startswith(("2", "3")):
@@ -907,8 +954,21 @@ def deep_dive(needle, apps, running):
         want = svc.upper().replace("-", "_")
         holder = [s for s, v in svcs.items() if v["fqdn"] == want]
         if svcs and not holder:
-            bad(f"domain is on '{svc}' but no service references ${{SERVICE_FQDN_{want}}}")
-            note("without that reference Coolify will not route to it")
+            # A warning, not a failure: the reference is what makes Coolify
+            # GENERATE a domain. A domain set by hand in the UI routes without
+            # it -- Karlene James has this mismatch and returns 200.
+            warn(f"no service references ${{SERVICE_FQDN_{want}}}, though the "
+                 f"domain is on '{svc}'")
+            note("harmless if the domain was set in the UI; Coolify just will")
+            note("not generate or regenerate one for this service by itself")
+    # The port ambiguity, which IS fatal and shows up as 502 on a healthy app.
+    for r in live:
+        for svc, _host in real_domains(r["domains"]):
+            why = port_problem(r["uuid"], svc)
+            if why:
+                bad(f"{r['env']}: {why}")
+                note("fix: serve on the port the base image already exposes, or")
+                note("append :PORT to the domain in Coolify so it emits a port label")
 
 
 def main():

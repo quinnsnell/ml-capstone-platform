@@ -409,6 +409,15 @@ Every stage is a no-op for anyone already provisioned:
 - **`invite-to-org.sh`** reports `EXISTS-active` or `EXISTS-pending` and re-invites nobody.
 - **`provision-gh-teams.sh`** reuses existing teams and skips members already in them.
 - **`provision-teams.sh`** plans each row as `CREATE` or `EXISTS`, and its SQL is `NOT EXISTS`-guarded regardless.
+- **The one row that is *not* `NOT EXISTS`-guarded is `users`.** It is an upsert
+  that rewrites `password` on conflict, so a run against a roster of students
+  who already exist will reset all of their Coolify passwords to whatever
+  `--class-password` resolves to. Pass **`--keep-passwords`** whenever the point
+  of the run is to add existing students to new teams (the group phase) — it
+  turns that clause into `DO NOTHING`. `--apply` refuses to run with the
+  built-in placeholder password at all, because this repository is public and
+  Coolify accepts email+password login for existing accounts. See
+  *Term-start onboarding → Step 3d*.
 - **`verify-provisioning.sh`** is read-only.
 
 Two things to watch:

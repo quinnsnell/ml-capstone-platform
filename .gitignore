@@ -4,8 +4,12 @@
 
 # Certificates & keys
 _secrets/
-star_cs_byu_edu*.zip
-star_cs_byu_edu*/
+# Any wildcard-cert bundle, whatever the sysadmins name it. The previous
+# pattern only matched star_cs_byu_edu*, so star_ml-capstone_cs_byu_edu.zip
+# arrived untracked-but-committable in a repo where `git add -A` is routine.
+star_*.zip
+star_*/
+*.zip
 *.pem
 *.key
 *.crt

@@ -187,6 +187,50 @@ The script runs preflight → plan → apply → verify in one transactional bat
 
 > **`--observer <email>` (or `OPERATOR_EMAIL` env var)** adds you as an admin of every provisioned team so they all appear in your Coolify team switcher. Without it, provisioned teams are invisible to your login (multi-tenant isolation) and you'd need to manually add yourself to each team's `team_user` row to walk the UI checklist in step 4. Set `OPERATOR_EMAIL` in your rigel shell profile (`~/.bashrc`) once and forget it. The observer email must already exist in Coolify's `users` table — sign in at least once via GitHub OAuth so the row exists.
 
+**Step 3d — the class password.**
+
+Coolify prompts for a password on every destructive-action modal (Delete
+Application, Delete Project) even when the session came from GitHub OAuth, and
+Coolify's own "Change Password" flow needs a current password to set a new one.
+So provisioning seeds one. Students never need it to log in — only to confirm a
+deletion.
+
+```bash
+ssh rigel 'cd ~/ml-capstone-platform && OPERATOR_EMAIL=snell@cs.byu.edu \
+  ./scripts/provision-teams.sh --roster roster-2026-fall.csv \
+  --class-password <the-value> --apply'
+```
+
+Three rules, in order of how badly they bite:
+
+1. **Never commit the value.** This repository is public. The script's built-in
+   placeholder, `capstone-changeme`, is therefore a published password — and
+   Coolify's login form accepts email+password for accounts that already exist,
+   even with registration disabled. A known password plus a student's email is
+   an account takeover for anyone who can reach the CS VPN. `--apply` now
+   refuses to run with the placeholder for exactly this reason.
+2. **Tell students out of band.** Post it in Canvas or say it in class. The
+   student guide and troubleshooting page deliberately say "ask your
+   instructor" rather than printing a value, and they should stay that way.
+3. **Use `--keep-passwords` when adding existing students to new teams.** The
+   users insert is an upsert that rewrites `password` on conflict, so a group-
+   phase run without this flag silently resets every account that already
+   exists. With it, the clause becomes `DO NOTHING` and existing users are left
+   completely alone; genuinely new students are still created normally.
+
+**Rotating it mid-term** is the same command with a new value and the full
+roster — the upsert is doing its intended job there, rewriting every hash:
+
+```bash
+ssh rigel 'cd ~/ml-capstone-platform && \
+  ./scripts/provision-teams.sh --roster roster-2026-fall.csv \
+  --class-password <the-new-value> --apply'
+```
+
+Confirm afterwards that no student set their own password first — rotation
+overwrites a personal password too, which is why a class-wide rotation is worth
+announcing before you run it.
+
 ### 4. Smoke-test everything before handing off to students
 
 Run the verifier on rigel (read-only, no `--apply` — it's a pure check):

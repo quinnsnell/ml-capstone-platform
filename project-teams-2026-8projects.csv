@@ -1,0 +1,29 @@
+project,assigned_rank,preferred_over_this,tiebreak,teammates_with,teammates_not_with,form_name,netid,roster_name,email,github_username,coolify_team
+Amby: Small Language Model,1,,Teammates,"Jansen Nye, Josh Ware",,Carter Lee,carterl8,Carter Lee,cartercklee@gmail.com,Tarotar30127,Carter Lee's Sandbox
+Amby: Small Language Model,1,,Teammates,"Carter Lee, Josh Ware",,Jansen Nye,jansen05,Jansen Nye,jansennye989@gmail.com,JansenNye,Jansen Nye's Sandbox
+Amby: Small Language Model,1,,Teammates,"Carter Lee, Jansen Nye",,Josh Ware,joshware,Joshua Michael Ware,joshware99@gmail.com,jware99,Joshua Michael Ware's Sandbox
+Amby: Small Language Model,3,#1 FS Record; #2 FS Agentic,Project,,"Julia Knecht, Kaden Kartchner, Matthew Farnsworth",Ashley Slade,anie2884,Ashley Slade,ashleynielse@gmail.com,nielsenash,Ashley Slade's Sandbox
+Dryden: Has This Model Memorized This Text?,1,,Project,Laurel Rolfs,"Thomas Esplin, Ashley Slade, Bella Esplin",Julia Knecht,jbutiko2,Julia Ann Knecht,jbutiko2@byu.edu,julia-knecht,Julia Ann Knecht's Sandbox
+Dryden: Has This Model Memorized This Text?,1,,Teammates,Julia Knecht,"Thomas Esplin, Ashley Slade, Bella Esplin",Laurel Rolfs,rolfslau,Laurel Rolfs,rolfslau@byu.edu,rolfslau,Laurel Rolfs's Sandbox
+Dryden: Has This Model Memorized This Text?,1,,Project,,,Sara Hermosilla,shc49@byu.edu,Sara Beatriz Hermosilla Cifuentes,sarahermosillac@gmail.com,Sarikato22,Sara Beatriz Hermosilla Cifuentes's Sandbox
+Dryden: Has This Model Memorized This Text?,2,#1 Dryden Code Review,Project,,,Charles Oliphant,296160003,Charles Henry Oliphant,choliphant4@gmail.com,choliphant,Charles Henry Oliphant's Sandbox
+FamilySearch: Tree Data Integrity,2,#1 FS Agentic; #1 FS Record,Project,,,Cameron Chamberlain,camchamb,Cameron James Chamberlain,Cameronchamberlain1@gmail.com,camchamb,Cameron James Chamberlain's Sandbox
+FamilySearch: Tree Data Integrity,2,#1 Dryden Memorized,Project,,,Darren Skidmore,drs0515,Darren Russell Skidmore,darrenrs0515@gmail.com,darrenrs,Darren Russell Skidmore's Sandbox
+FamilySearch: Tree Data Integrity,2,#1 FS Record,Project,Cameron Chamberlain,"Cameron, Cameron Kersey",Kaden Kartchner,kad3n,Kaden Matthew Kartchner,kad3n@byu.edu,kademiester2003,Kaden Matthew Kartchner's Sandbox
+FamilySearch: Tree Data Integrity,3,#1 FS Agentic; #2 Dryden Code Review,Project,,,Matthew Farnsworth,mfarns03,Matthew Farnsworth,matthewbfarnsworth@gmail.com,matthewbfarnsworth,Matthew Farnsworth's Sandbox
+Students: Budget Meal Planning Agent,1,,Project,,,Bella Esplin,gbean4,Gabriella Faye Bean Esplin,gbean4@byu.edu,gbean4,Gabriella Faye Bean Esplin's Sandbox
+Students: Budget Meal Planning Agent,1,,Project,Taft Lakey,,Johnathan Goodlad,jgoodlad,Johnathan Goodlad,thejagoodlad@gmail.com,TheJrock,Johnathan Goodlad's Sandbox
+Students: Budget Meal Planning Agent,1,,Project,Johnathan Goodlad,,Taft Lakey,taftjl12,Taft Lakey,taftlakey@gmail.com,taftlakey,Taft Lakey's Sandbox
+Students: Budget Meal Planning Agent,1,,Project,,,Xinwei Zhu,easonzhu,XINWEI ZHU,easonzhu@byu.edu,EasonZhuu,XINWEI ZHU's Sandbox
+Amby: Social Media Listening Agent,1,,Project,,,Andre Agurire Roman,ankar99,Andre Karel Aguirre Roman,ankar_aguirre@live.com,andreaguirreroman,Andre Karel Aguirre Roman's Sandbox
+Amby: Social Media Listening Agent,3,#1 FS Personalized; #2 Amby SLM,Project,,,Cameron Kersey,cadeke,Cameron Kersey,cadeke@byu.edu,AtlasGrey001,Cameron Kersey's Sandbox
+Amby: Social Media Listening Agent,3,#1 Dryden Memorized; #1 Dryden Code Review; #2 Amby SLM; #2 FS Personalized,Project,Andre Agurire Roman,"Julia Knecht, Jansen Nye",Tyler Reese,tbreese,Tyler Reese,tyguyreeses@gmail.com,tyguyreeses,Tyler Reese's Sandbox
+BYU OIT: Agent Harness Benchmarking,1,,Project,,Darren Skidmore,Aiden Beus,aidenb02,Aiden James Beus,aidenb02@byu.edu,AidenBeus,Aiden James Beus's Sandbox
+BYU OIT: Agent Harness Benchmarking,3,#1 GSL Forecast; #2 Meal Planning,Teammates,,,Adam Leishman,aleishm0,Adam Leishman,ahri177511@gmail.com,AzraelStrife17,Adam Leishman's Sandbox
+BYU OIT: Agent Harness Benchmarking,3,#1 Waystar Analytics; #1 Waystar Revenue; #2 Amby Social; #2 FS Agentic; #2 FS Record; #2 Dryden Memorized; #2 Dryden Code Review; #2 OIT Multi-Agent,Teammates,,"Andre Agurire Roman, Joey Dahlke",Thomas Esplin,tesplin3,Thomas Stolworthy Esplin,tom.esplin@gmail.com,tom-esplin,Thomas Stolworthy Esplin's Sandbox
+Dr. Snell: Great Salt Lake Water Supply Forecast,1,,Teammates,,,Cameron,cmmorris,Cameron Michael Morris,cmmorriscampechana@gmail.com,The-Mysterious-Baffler,Cameron Michael Morris's Sandbox
+Dr. Snell: Great Salt Lake Water Supply Forecast,2,#1 Dryden Memorized,Project,,,Karly James,kjames1a,Karlene Alexa James,kjames1a@byu.edu,karlyjames1a,Karlene Alexa James's Sandbox
+Dr. Snell: Great Salt Lake Water Supply Forecast,2,#1 FS Personalized,Project,,,Roger Alessandro Cifuentes Castro,rogerac,Roger Alessandro Cifuentes,rogerac@byu.edu,rogalessandro,Roger Alessandro Cifuentes's Sandbox
+Waystar: Revenue Cycle Patient Journey,2,#1 Amby Social; #1 Amby SLM,Project,,,Doyoung Yoon,dy798227,Doyoung Yoon,qkzld13@gmail.com,Yoondoyoung,Doyoung Yoon's Sandbox
+Waystar: Revenue Cycle Patient Journey,2,#1 Waystar Analytics,Project,,"Thomas Esplin, Bella Esplin",Joey Dahlke,jdah8567,Joseph Dahlke,jcdahlke2020@gmail.com,jcdahlke,Joseph Dahlke's Sandbox
+Waystar: Revenue Cycle Patient Journey,2,#1 Dryden Memorized,Project,,,Mike Taylor,mjt761,Michael Jed Taylor,mjt761@byu.edu,mike-taylor2,Michael Jed Taylor's Sandbox
