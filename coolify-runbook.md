@@ -319,7 +319,7 @@ Restart Coolify's proxy after wiring the cert in: `docker restart coolify-proxy`
 **Coverage.** The wildcard covers one level under `cs.byu.edu`, so it covers `ml-capstone-admin.cs.byu.edu` (single level) but not two-level names like `<team>.ml-capstone.cs.byu.edu`. Consequences:
 
 - Coolify admin UI, LiteLLM, GitHub webhooks — all get HTTPS.
-- Student apps at `<team>.ml-capstone.cs.byu.edu` — serve **HTTP only**. Traffic is still encrypted at the VPN layer, so this is defensible for a classroom. A future two-level wildcard (separate CS IT ticket) would let student apps go HTTPS naturally.
+- Student apps at `<team>.ml-capstone.cs.byu.edu` — serve **HTTPS**, terminated by Traefik using the `*.ml-capstone.cs.byu.edu` wildcard CS IT issued on 2026-10-08. The cert pair lives in `/traefik/certs/` and is declared in `/traefik/dynamic/ml-capstone-wildcard.yaml`, which the file provider watches, so installing it needed no restart. A single wildcard matches one label, so `www.<repo>.ml-capstone.cs.byu.edu` is **not** covered.
 
 **Renewal.** Cert valid 2026-07-09 → 2027-01-23. Set a mid-January calendar reminder; CS IT will re-issue and hand off new files. Drop them in place and `docker restart coolify-proxy`.
 

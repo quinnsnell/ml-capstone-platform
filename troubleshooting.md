@@ -149,7 +149,9 @@ That plain-text 404 is Traefik saying *no route exists for this hostname* — it
 
    Your domain should appear in that list.
 
-3. **You are on `https://`.** Student apps are routed on the HTTP entrypoint only, because the `*.cs.byu.edu` wildcard cert covers one level and these hostnames are two levels deep. An HTTPS request finds no matching router and gets a **503 "no available server"** rather than a 404 — so if you are seeing 503 instead, switch to `http://`. Some browsers upgrade silently.
+3. **The domain is set but you never redeployed.** Traefik bakes its routing labels into the container when it starts, so a domain added after the container came up leaves the URL with no route. Hit **Redeploy**. This is the single most common cause of a 404 or 503 on an app that deployed successfully.
+
+   Student apps now serve **HTTPS** — CS IT issued a wildcard for `*.ml-capstone.cs.byu.edu`. An `http://` URL redirects rather than failing. If `curl` prints the literal word `Found`, that is the redirect: add `-L`, or use the https URL. A `www.` domain is two labels deep and is **not** covered by the wildcard; delete those rows.
 
 ### Deploy succeeded, then the app died a couple of hours later
 

@@ -510,7 +510,7 @@ You'll create your class repo **inside the org**, not under your personal accoun
 - **Repository name:** follow the class convention **`<yourname>-<appname>`** for solo work, or **`<groupname>-<appname>`** once you move to the group project. Examples:
   - Individual sandbox phase: `alice-hello`, `alice-sentiment`, `qsnell-hello-world`
   - Group phase: `group1-sentiment`, `group3-recommender`
-  - Your repo name becomes your deploy hostname prefix (thanks to wildcard DNS at `*.ml-capstone.cs.byu.edu`) — e.g., repo `alice-sentiment` → prod at `http://alice-sentiment.ml-capstone.cs.byu.edu`. Pick something you'll want to see in URLs.
+  - Your repo name becomes your deploy hostname prefix (thanks to wildcard DNS at `*.ml-capstone.cs.byu.edu`) — e.g., repo `alice-sentiment` → prod at `https://alice-sentiment.ml-capstone.cs.byu.edu`. Pick something you'll want to see in URLs.
 - **Public** or **Private** — either works; Private is fine and matches production practice
 - ❌ **Leave "Include all branches" UNCHECKED.** Copy only `main`. You will create `staging` from it in the next step — see the warning below for why this matters.
 - Click **Create repository from template**
@@ -585,7 +585,7 @@ cd backend  && pytest -v && cd ..    # 11 pass
 
 CI runs both — a failure in either blocks the deploy.
 
-Then start all three services detached via Docker Compose. Note the startup order is declared, not hoped for: `backend` waits for `db` to be healthy, and `frontend` waits for `backend`. **Shortcut:** the template ships a `smoke-test.sh` at the repo root that does exactly the block below (compose up + build, wait for `/health`, curl `/`, `/health`, `/ready`, `/time`, POST + GET `/notes`, print the stop command). Run `./smoke-test.sh` if you'd rather not type it out. The same script accepts an optional URL argument (`./smoke-test.sh http://<your-repo>-staging.ml-capstone.cs.byu.edu`) to smoke-test a deployed instance without touching local Docker — handy after a Coolify deploy. What the local flavor does under the hood:
+Then start all three services detached via Docker Compose. Note the startup order is declared, not hoped for: `backend` waits for `db` to be healthy, and `frontend` waits for `backend`. **Shortcut:** the template ships a `smoke-test.sh` at the repo root that does exactly the block below (compose up + build, wait for `/health`, curl `/`, `/health`, `/ready`, `/time`, POST + GET `/notes`, print the stop command). Run `./smoke-test.sh` if you'd rather not type it out. The same script accepts an optional URL argument (`./smoke-test.sh https://<your-repo>-staging.ml-capstone.cs.byu.edu`) to smoke-test a deployed instance without touching local Docker — handy after a Coolify deploy. What the local flavor does under the hood:
 
 ```bash
 export SERVICE_FQDN_FRONTEND=http://localhost:8000  # stubs the compose interpolation
@@ -747,8 +747,8 @@ Coolify's API won't let Terraform set per-service domains on a Docker Compose ap
 
 | Application | Domain |
 |---|---|
-| staging | `http://<your-repo>-staging.ml-capstone.cs.byu.edu` |
-| production | `http://<your-repo>.ml-capstone.cs.byu.edu` |
+| staging | `https://<your-repo>-staging.ml-capstone.cs.byu.edu` |
+| production | `https://<your-repo>.ml-capstone.cs.byu.edu` |
 
 Delete the auto-generated `<longhash>.sslip.io` placeholder and the `www.` variant if Coolify added one. Don't click "Generate Domain".
 
@@ -812,7 +812,7 @@ On the General page, top to bottom:
 **Now set the Domain.** Scroll down on the General page to the **Access** section and click the gear icon next to **"1 configured domain"** (or click the **Domains** tab in the Application's left tab bar — same page). Coolify has already auto-created a placeholder domain that looks like `<longhash>.<ip>.sslip.io` — that was Coolify's stopgap while you had no real domain configured. You'll replace it:
 
 - **Add a new domain**:
-  - **Protocol**: `http://`
+  - **Protocol**: `https`
   - **Domain**: `<your-repo>.ml-capstone.cs.byu.edu` — use your actual repo name as the prefix (e.g., repo `alice-sentiment` → `alice-sentiment.ml-capstone.cs.byu.edu`). Wildcard DNS covers whatever you pick.
   - **Port**: `8000` — matches the container's `EXPOSE 8000` from your Dockerfile.
 - **Delete the `<longhash>.sslip.io` placeholder** — you don't need it once you have a real domain.
@@ -820,7 +820,9 @@ On the General page, top to bottom:
 - **Do NOT click "Generate Domain"** — that button produces another `.sslip.io` URL and can trigger a Coolify UI crash.
 - **Save** the Domains configuration.
 
-> **Why HTTP not HTTPS?** The CS wildcard cert covers `*.cs.byu.edu` (one level only), so it doesn't cover the two-level `<your-repo>.ml-capstone.cs.byu.edu` your app lives at. Rather than have every student's browser scream "Not Secure," student apps serve over plain HTTP. Traffic is already encrypted at the VPN layer, so this is safe. A future upgrade to a two-level wildcard cert would make HTTPS work naturally.
+> **HTTPS.** CS IT issued a wildcard certificate for `*.ml-capstone.cs.byu.edu` — scoped to our subdomain rather than one level under `cs.byu.edu`, which is what makes these hostnames coverable. Your app serves real HTTPS with no browser warning, and Traefik redirects any `http://` link to it.
+>
+> Two consequences worth knowing. `curl` does not follow redirects without `-L`, so hitting an `http://` URL prints `Found` rather than your JSON and silently drops `POST` bodies. And a `www.` domain is two labels deep, which a single wildcard cannot match — delete those rows rather than trying to make them work.
 
 Then click the **Advanced** tab:
 
@@ -863,7 +865,7 @@ Navigate up to the project (breadcrumb at top) → click into the **staging** En
 Then on the General page:
 
 - **Name**: rename the auto-generated `<your-repo>:staging-<longhash>` to something readable like `<your-repo>-staging`. Save.
-- **Access → gear icon on "1 configured domain"** (or **Domains tab**) → **+ Add**. Service: `frontend` (never `backend` or `db` — giving either a domain publishes it). Protocol: `http`. Domain: `<your-repo>-staging.ml-capstone.cs.byu.edu` — **without** the `http://`, since the protocol is its own dropdown. Leave **Port** and **Path** empty; Traefik works out the routing. Delete the `<longhash>.sslip.io` placeholder and the `www.` variant if Coolify added it. Do NOT click "Generate Domain". Save.
+- **Access → gear icon on "1 configured domain"** (or **Domains tab**) → **+ Add**. Service: `frontend` (never `backend` or `db` — giving either a domain publishes it). Protocol: `https`. Domain: `<your-repo>-staging.ml-capstone.cs.byu.edu` — **without** the `http://`, since the protocol is its own dropdown. Leave **Port** and **Path** empty; Traefik works out the routing. Delete the `<longhash>.sslip.io` placeholder and the `www.` variant if Coolify added it. Do NOT click "Generate Domain". Save.
 
 > **Saving a domain does not re-route a container that is already running.** Traefik decides where a request goes using labels baked into the container when it started, so a container launched before you set the domain keeps the old rule and your new URL answers `404 page not found`. If the app is already deployed, hit **Redeploy** after saving. Setting the domain *before* your first deploy avoids this entirely — which is why this step comes before you push anything.
 
@@ -955,11 +957,11 @@ Then flip to Coolify → your staging Application → **Deployments** tab. New d
 Verify staging is live:
 
 ```bash
-curl -s http://<your-repo>-staging.ml-capstone.cs.byu.edu/health && echo
+curl -s https://<your-repo>-staging.ml-capstone.cs.byu.edu/health && echo
 # {"ok":true,"version":"0.1.2"}
 ```
 
-Prod hasn't been deployed yet (`curl http://<your-repo>.ml-capstone.cs.byu.edu/health` still errors) — you'll deploy prod at the end via the staging → main merge. That's how you always want prod to work: nothing goes there without going through staging first.
+Prod hasn't been deployed yet (`curl https://<your-repo>.ml-capstone.cs.byu.edu/health` still errors) — you'll deploy prod at the end via the staging → main merge. That's how you always want prod to work: nothing goes there without going through staging first.
 
 **Step B — Second push: change the app's BEHAVIOR without updating the test.**
 
@@ -1050,9 +1052,9 @@ Open the Coolify staging Application → **Deployments** tab. New deployment app
 **Step H — Verify staging deployed at 0.1.3. Prod still hasn't received its first deploy.**
 
 ```bash
-curl -s http://<your-repo>-staging.ml-capstone.cs.byu.edu/health && echo
-curl -s "http://<your-repo>-staging.ml-capstone.cs.byu.edu/?lang=es" && echo
-curl -s http://<your-repo>.ml-capstone.cs.byu.edu/health && echo
+curl -s https://<your-repo>-staging.ml-capstone.cs.byu.edu/health && echo
+curl -s "https://<your-repo>-staging.ml-capstone.cs.byu.edu/?lang=es" && echo
+curl -s https://<your-repo>.ml-capstone.cs.byu.edu/health && echo
 ```
 
 Expected:
@@ -1078,8 +1080,8 @@ Watch Actions run again — this time `deploy-prod` fires instead of `deploy-sta
 **Step J — Verify prod deployed.**
 
 ```bash
-curl -s http://<your-repo>.ml-capstone.cs.byu.edu/health && echo
-curl -s "http://<your-repo>.ml-capstone.cs.byu.edu/?lang=es" && echo
+curl -s https://<your-repo>.ml-capstone.cs.byu.edu/health && echo
+curl -s "https://<your-repo>.ml-capstone.cs.byu.edu/?lang=es" && echo
 ```
 
 Both should now return the 0.1.3 responses. **Your entire pipeline is proven end-to-end.** Everything after this is code — you know how the mechanics work.
@@ -1290,22 +1292,22 @@ git commit -m "v0.1.4: add priority column to notes"
 git push
 ```
 
-Watch the Coolify Deployments tab (or run `./smoke-test.sh http://<your-repo>-staging.ml-capstone.cs.byu.edu` after ~30s). During startup, the **`backend`** container logs `applied migration 002_add_priority.sql` — that is the container to check if the migration seems not to have run. Redeploying the same commit later would instead log `no pending migrations`, because the runner sees 002 already recorded in `_migrations` and skips it.
+Watch the Coolify Deployments tab (or run `./smoke-test.sh https://<your-repo>-staging.ml-capstone.cs.byu.edu` after ~30s). During startup, the **`backend`** container logs `applied migration 002_add_priority.sql` — that is the container to check if the migration seems not to have run. Redeploying the same commit later would instead log `no pending migrations`, because the runner sees 002 already recorded in `_migrations` and skips it.
 
 Verify:
 
 ```bash
 # The row from Step A survived — got priority=0 via the DDL default:
-curl http://<your-repo>-staging.ml-capstone.cs.byu.edu/notes
+curl https://<your-repo>-staging.ml-capstone.cs.byu.edu/notes
 # [{"id":1,"body":"my first note","priority":0,"created_at":"..."}]
 
 # New POST with priority works:
-curl -X POST http://<your-repo>-staging.ml-capstone.cs.byu.edu/notes \
+curl -X POST https://<your-repo>-staging.ml-capstone.cs.byu.edu/notes \
   -H 'Content-Type: application/json' -d '{"body":"urgent!","priority":5}'
 # {"id":2,"body":"urgent!","priority":5,"created_at":"..."}
 
 # And POST without priority still works — Pydantic's default kicks in:
-curl -X POST http://<your-repo>-staging.ml-capstone.cs.byu.edu/notes \
+curl -X POST https://<your-repo>-staging.ml-capstone.cs.byu.edu/notes \
   -H 'Content-Type: application/json' -d '{"body":"whenever"}'
 # {"id":3,"body":"whenever","priority":0,"created_at":"..."}
 ```
@@ -1941,7 +1943,7 @@ reachable from your laptop but not from the container.
 
 **In the full setup we are aiming for**, a self-hosted GitHub Actions runner
 inside the CS VPN runs pytest against
-`http://<your-repo>-staging.ml-capstone.cs.byu.edu` on every staging deploy. That
+`https://<your-repo>-staging.ml-capstone.cs.byu.edu` on every staging deploy. That
 runner does not exist yet — it is on the roadmap.
 
 **Right now**, the container health check is the closest thing you have, and you
@@ -1998,7 +2000,7 @@ the HEALTHCHECK on `/health`, and hit `/ready` yourself right after a deploy —
 one line in `smoke-test.sh`, which already takes a URL:
 
 ```bash
-./smoke-test.sh http://<your-repo>-staging.ml-capstone.cs.byu.edu
+./smoke-test.sh https://<your-repo>-staging.ml-capstone.cs.byu.edu
 ```
 
 You get the strict check's information without letting an outage elsewhere
@@ -2130,7 +2132,7 @@ Watch:
 
 1. **GitHub Actions tab** → CI/CD workflow runs. Job graph shows `test` → `deploy-staging`.
 2. **Coolify UI** — your staging Application shows a new deployment.
-3. `curl http://<your-repo>-staging.ml-capstone.cs.byu.edu/health` returns your new `/health` JSON (VPN required).
+3. `curl https://<your-repo>-staging.ml-capstone.cs.byu.edu/health` returns your new `/health` JSON (VPN required).
 
 When staging looks good, promote to prod exactly like the Setup Step 10 walkthrough taught you — PR from `staging` into `main` (or merge locally + push), and `deploy-prod` fires.
 
@@ -2157,7 +2159,7 @@ Fast feedback loop: green here means you're safe to push. Roughly 30 seconds aft
 **Also works against a deployed URL** — same script, but pass the deployed base URL as an argument. Skips the docker compose steps and just curls the endpoints:
 
 ```bash
-./smoke-test.sh http://<your-repo>-staging.ml-capstone.cs.byu.edu
+./smoke-test.sh https://<your-repo>-staging.ml-capstone.cs.byu.edu
 ```
 
 Nice for a quick sanity check right after a Coolify deploy: "did the endpoints actually come up on the live URL?" Same script, so what passes locally should pass remotely; if it doesn't, you've found a bug that only appears in the Coolify environment.
@@ -2188,7 +2190,7 @@ Green here means: your staging deploy handles the diverse real inputs your users
 Sample output:
 
 ```
-integration-test.sh   target=http://group-1-staging.ml-capstone.cs.byu.edu
+integration-test.sh   target=https://group-1-staging.ml-capstone.cs.byu.edu
 ────────────────────────────────────────────────────────────────────────────
 
 Basic contract
@@ -3070,7 +3072,7 @@ You now have a Coolify Project, both Environments, both Applications, and all th
 
 ## Phase 2: Set the pretty domain (the one thing terraform can't do)
 
-> **Don't skip this.** If you do, your app will deploy successfully — but to a Coolify-auto-generated URL like `http://<uuid>.128.187.112.8.sslip.io` instead of the class-wildcard `http://<yourname>-terraform-lab.ml-capstone.cs.byu.edu`. The domain lives on the Coolify Application side, so re-running `terraform apply` won't fix it after the fact.
+> **Don't skip this.** If you do, your app will deploy successfully — but to a Coolify-auto-generated URL like `http://<uuid>.128.187.112.8.sslip.io` instead of the class-wildcard `https://<yourname>-terraform-lab.ml-capstone.cs.byu.edu`. The domain lives on the Coolify Application side, so re-running `terraform apply` won't fix it after the fact.
 
 **Why it's manual.** Three-deep chain of provider/API limitations, all rooted in the Coolify terraform provider being immature:
 
@@ -3103,7 +3105,7 @@ git commit --allow-empty -m "trigger first deploy"
 git push origin staging
 ```
 
-Watch the GitHub Actions tab run tests → POST the staging webhook → Coolify build + deploy. Hit `http://<yourname>-terraform-lab-staging.ml-capstone.cs.byu.edu` — same result as the UI flow, this time reproducible from code.
+Watch the GitHub Actions tab run tests → POST the staging webhook → Coolify build + deploy. Hit `https://<yourname>-terraform-lab-staging.ml-capstone.cs.byu.edu` — same result as the UI flow, this time reproducible from code.
 
 Merge staging → main to trigger the prod deploy.
 
@@ -3163,8 +3165,8 @@ Exactly one server comes back — copy its `uuid` into `terraform.tfvars`. (The 
 | VPN gateway | `cs-vpn.byu.edu` (GlobalProtect client) |
 | Coolify admin UI | `https://ml-capstone-admin.cs.byu.edu` (VPN) |
 | GitHub org | `github.com/byu-ml-capstone` |
-| Your staging URL | `http://<your-repo>-staging.ml-capstone.cs.byu.edu` |
-| Your prod URL | `http://<your-repo>.ml-capstone.cs.byu.edu` |
+| Your staging URL | `https://<your-repo>-staging.ml-capstone.cs.byu.edu` |
+| Your prod URL | `https://<your-repo>.ml-capstone.cs.byu.edu` |
 | Repo naming convention | `<your-repo>` under `byu-ml-capstone/` |
 | Container port your app must listen on | `8000` (matches Coolify's Port setting) |
 | Container bind address | `0.0.0.0` (not `127.0.0.1` — see Section 1e) |

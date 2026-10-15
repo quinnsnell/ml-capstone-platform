@@ -395,7 +395,7 @@ container when it starts, so a domain set afterwards leaves your URL returning
 7. **Service:** `frontend` — this dropdown lists your containers, and `frontend`
    is the only one users should reach. `backend` and `db` are internal; giving
    either a domain would publish it
-8. **Protocol:** `http` — check it, do not assume
+8. **Protocol:** `https` — check it, do not assume
 9. **Domain:** `<your-repo>-staging.ml-capstone.cs.byu.edu`
    — **without** the `http://`; the protocol is the separate dropdown above
 10. **Port:** leave it empty. Traefik works out the routing.
@@ -414,10 +414,19 @@ Same path, but click **production** at step 3, and the resource will be named
 Delete the auto-generated `<longhash>.sslip.io` placeholder, and the `www.`
 variant if Coolify added one. Do **not** click "Generate Domain".
 
-> **`http://`, not `https://`.** The CS wildcard certificate covers one level
-> under `cs.byu.edu` and these names are two levels deep, so student apps are
-> routed on HTTP only. An `https://` request returns `503 no available server`,
-> not a certificate warning — which looks like a broken deploy but isn't.
+> **`https`, not `http`.** CS IT issued a wildcard certificate for
+> `*.ml-capstone.cs.byu.edu`, so your app is served over real HTTPS with no
+> browser warning. Pick `https` in the Protocol dropdown.
+>
+> Anyone who still has an `http://` link is fine — Traefik redirects it. But
+> `curl` does **not** follow redirects unless you pass `-L`, so an http URL
+> prints the literal word `Found` instead of your JSON, and a `POST` stops at
+> the redirect without ever reaching your app. If you see `Found`, add `-L` or
+> use the https URL.
+>
+> The one thing the certificate cannot cover is a `www.` domain —
+> `www.<your-repo>.ml-capstone.cs.byu.edu` is two labels deep, so a single
+> wildcard does not match it. Delete those rows.
 
 ---
 
@@ -458,14 +467,14 @@ files too, and `terraform.tfvars` is only kept out of your commits by a line in
 3. **Your staging URL:**
 
 ```bash
-curl -s http://<your-repo>-staging.ml-capstone.cs.byu.edu/health
+curl -s https://<your-repo>-staging.ml-capstone.cs.byu.edu/health
 # {"ok":true,"version":"0.1.2"}
 ```
 
 Now check production:
 
 ```bash
-curl -s http://<your-repo>.ml-capstone.cs.byu.edu/health
+curl -s https://<your-repo>.ml-capstone.cs.byu.edu/health
 # 404 page not found
 ```
 
@@ -579,7 +588,7 @@ Merge it. Then watch Actions again: `test` passes, `deploy-prod` runs,
 `deploy-staging` skips. When it finishes:
 
 ```bash
-curl -s http://<your-repo>.ml-capstone.cs.byu.edu/health
+curl -s https://<your-repo>.ml-capstone.cs.byu.edu/health
 # {"ok":true,"version":"0.1.2"}
 ```
 
@@ -744,7 +753,7 @@ Two places to run it, and the second is the one that finds real problems:
 curl -fsS "http://localhost:8080/api/items" | grep smoke-test
 
 # against the deployed app, on the CS VPN — same path, your staging hostname
-curl -fsS "http://staging-yourapp.ml-capstone.cs.byu.edu/api/items" | grep smoke-test
+curl -fsS "https://staging-yourapp.ml-capstone.cs.byu.edu/api/items" | grep smoke-test
 ```
 
 The deployed run is not the same run. Coolify ignores
@@ -796,7 +805,8 @@ disagree.
 | `terraform plan` 401 | token wrong, trailing whitespace, or you edited `terraform.tfvars.example` instead of `terraform.tfvars` |
 | `terraform plan` 404 on application | wrong server UUID — you used another team's |
 | Your URL: `404 page not found` | nothing deployed yet, or domain set after deploy — hit **Redeploy** |
-| Your URL: `503 no available server` | you used `https://` — student apps are HTTP only |
+| Your URL: `503 no available server` | the domain is set but the app has no route — redeploy after setting it |
+| `curl` prints `Found` instead of JSON | you used the `http://` URL and curl did not follow the redirect — add `-L` |
 | Your URL hangs / won't resolve | not on the CS VPN, or on campus `vpn.byu.edu` instead of `cs-vpn.byu.edu` |
 | Pushed, but no Actions run | you only changed markdown |
 | Actions red at `test` | your code is broken — nothing deployed, old version still live |

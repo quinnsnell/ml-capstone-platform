@@ -56,8 +56,8 @@ real and running right now (CS VPN required).
 | What | Where |
 |---|---|
 | Demo repo | `github.com/byu-ml-capstone/hello-test-qsnell` |
-| Staging | http://hello-test-qsnell-staging.ml-capstone.cs.byu.edu |
-| Production | http://hello-test-qsnell.ml-capstone.cs.byu.edu |
+| Staging | https://hello-test-qsnell-staging.ml-capstone.cs.byu.edu |
+| Production | https://hello-test-qsnell.ml-capstone.cs.byu.edu |
 | Coolify | https://ml-capstone-admin.cs.byu.edu |
 | Template | `github.com/byu-ml-capstone/hello-world-app` |
 
@@ -67,7 +67,7 @@ deployment log, and `curl .../health` in a loop. Students watch the version
 change under them. Total elapsed time is under two minutes.
 
 ```bash
-watch -n2 'curl -s http://hello-test-qsnell-staging.ml-capstone.cs.byu.edu/health'
+watch -n2 'curl -s https://hello-test-qsnell-staging.ml-capstone.cs.byu.edu/health'
 ```
 
 Then show production still on the old version — that is the "two environments"

@@ -145,9 +145,12 @@ def malformed_domains(blob: str) -> list[tuple[str, str, str]]:
     """[(service, raw value, why it cannot route)] for domains typed wrong.
 
     Coolify stores whatever is pasted into the Domains box, and Traefik then
-    matches on it literally. Every one of these has cost a student a lab
-    session: `https://` (student apps are HTTP only), `http//` with the colon
-    missing, and a `:port` suffix that Traefik does not want.
+    matches on it literally. Each of these has cost a student a lab session.
+
+    `https://` used to be listed here; it is now the CORRECT scheme, since CS
+    IT issued a wildcard for *.ml-capstone.cs.byu.edu on 2026-10-08. What is
+    wrong now is the reverse: a `www.` host, which is two labels deep and so is
+    not matched by a single wildcard.
     """
     if not blob:
         return []
@@ -163,8 +166,9 @@ def malformed_domains(blob: str) -> list[tuple[str, str, str]]:
                 continue
             rest = re.sub(r"^https?://", "", raw)
             why = None
-            if raw.lower().startswith("https://"):
-                why = "stored as https — student apps are HTTP only"
+            if rest.lower().startswith("www."):
+                why = ("www. host — two labels deep, not covered by the "
+                       "wildcard cert; delete this row")
             elif "/" in rest:
                 why = "has a '/' — scheme typed wrong, e.g. http// for http://"
             elif re.search(r":\d+$", rest):

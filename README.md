@@ -90,7 +90,7 @@ short setup page: [`research-students.md`](research-students.md).
 | GitHub webhook (auto-deploy) | `https://ml-capstone.cs.byu.edu/webhooks/*` | Public internet (via CS IT HAProxy) |
 | Coolify API (deploy trigger from GitHub Actions) | `https://ml-capstone-admin.cs.byu.edu/api/v1/deploy/...` | Public internet, token-gated (via CS IT HAProxy) |
 | Coolify admin UI | `https://ml-capstone-admin.cs.byu.edu` | Publicly resolvable but OAuth-gated (invite-only) |
-| Student group apps | `http://<your-repo>.ml-capstone.cs.byu.edu` | VPN (serve HTTP — wildcard cert covers one level only) |
+| Student group apps | `https://<your-repo>.ml-capstone.cs.byu.edu` | VPN (serve HTTP — wildcard cert covers one level only) |
 
 Model aliases exposed by LiteLLM:
 
