@@ -14,6 +14,7 @@ Redundancy is layered:
 - **Centralized load balancing.** A single LiteLLM proxy on the front-end host (rigel.cs.byu.edu) lists both GPU machines' chat engines as one pool and both FIM engines as another. Requests fan out across castor and pollux automatically, keeping both hosts busy without any client-side coordination.
 - **Engine-level failover.** If a vLLM engine crashes — or a whole GPU host goes offline — LiteLLM routes to the surviving engine transparently. Students see nothing worse than a slightly slower first response.
 - **Single client-facing endpoint.** Every student's editor points at `http://ml-capstone.cs.byu.edu:4000/v1` regardless of role. No Group A / Group B split anymore — load balancing is done server-side.
+- **Speech-to-text shares that endpoint.** `classroom-transcribe` is a Whisper `large-v3` service running on rigel's own GPU 0, not on castor/pollux, registered as a LiteLLM model like any other. Install and lifecycle: Coolify runbook §6b, via `scripts/install-whisper-service.sh`. It is independent of the GPU hosts — a castor/pollux outage does not affect transcription, and vice versa.
 
 The one failure mode that's now class-wide is a **front-end host outage**: if rigel.cs.byu.edu is down, every student loses proxy access. Recovery is a manual client-config edit pointing directly at a raw vLLM engine on castor or pollux — see §4 and the recovery section in the Student Guide.
 
@@ -158,7 +159,7 @@ curl http://pollux.cs.byu.edu:8000/v1/models   # pollux chat
 curl http://pollux.cs.byu.edu:8010/v1/models   # pollux FIM
 
 # The front-end LiteLLM (installed per Coolify runbook §5) is the student-facing endpoint:
-curl http://ml-capstone.cs.byu.edu:4000/v1/models   # should list classroom-chat + classroom-autocomplete
+curl http://ml-capstone.cs.byu.edu:4000/v1/models   # classroom-chat + classroom-autocomplete + classroom-transcribe
 ```
 
 **Full-stack verification.** A repeatable smoke test ships in the repo — run it from your laptop over VPN whenever you want to confirm the cluster is healthy:

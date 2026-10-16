@@ -27,6 +27,9 @@ base URL here and use `classroom-chat` as the model name.
 > fill-in-the-middle model for editor ghost-text — not instruction-tuned, no chat
 > behaviour, and it will produce nonsense if you prompt it conversationally.
 
+There is also `classroom-transcribe` — Whisper `large-v3` for speech-to-text, on
+the same endpoint. See [Transcribing audio](#transcribing-audio) below.
+
 ---
 
 ## Step 1 — Get on the CS VPN
@@ -207,8 +210,80 @@ print()
 
 ```python
 print([m.id for m in client.models.list().data])
-# ['classroom-chat', 'classroom-autocomplete']
+# ['classroom-chat', 'classroom-autocomplete', 'classroom-transcribe']
 ```
+
+## Transcribing audio
+
+`classroom-transcribe` is Whisper `large-v3` running on faster-whisper, on the
+same base URL. It accepts audio *and* video files — you can hand it an `.mp4`
+directly without extracting the audio first.
+
+```python
+with open("clip.mp4", "rb") as f:
+    result = client.audio.transcriptions.create(
+        model="classroom-transcribe",
+        file=f,
+    )
+print(result.text)
+```
+
+Roughly 10× realtime: a 60-second clip returns in about 5 seconds. For long
+media, extracting audio first uploads far less data:
+
+```bash
+ffmpeg -i clip.mp4 -vn -ac 1 -ar 16000 clip.wav
+```
+
+### Timestamps and per-segment confidence
+
+Ask for `verbose_json` so the OpenAI SDK exposes the extra fields as typed
+attributes rather than leaving them in the raw payload:
+
+```python
+result = client.audio.transcriptions.create(
+    model="classroom-transcribe",
+    file=f,
+    response_format="verbose_json",
+)
+print(result.language, result.duration)
+for s in result.segments:
+    print(s["start"], s["end"], s["no_speech_prob"], s["text"])
+```
+
+It auto-detects across ~99 languages; pass `language="en"` only to force one.
+
+### Whisper invents text when there is no speech
+
+This is the failure that will quietly corrupt your results. Given audio with no
+speech in it, Whisper does not return an empty string — it emits a confident,
+plausible sentence. One second of a pure tone against this service returned:
+
+```
+text:           "Thanks for watching!"
+end timestamp:  29.98      (on a 1-second clip)
+no_speech_prob: 0.859
+```
+
+Read only `.text` and nothing about that looks wrong. It matters most for
+social-media video, where long stretches are music with no speech over them.
+
+**Filter on `no_speech_prob`.** Discard segments above roughly `0.6`–`0.8`.
+For calibration, genuine speech in the same tests scored `0.003`. Then
+spot-check real transcripts by hand before building analysis on top of them.
+Loud background music degrades accuracy even where speech is present.
+
+Do **not** rely on `vad_filter` for this. The endpoint accepts the parameter,
+but it did not suppress the hallucination above in testing — and unknown
+parameters are accepted silently rather than rejected, so an `HTTP 200` is not
+evidence that an option took effect.
+
+### What it does not do
+
+- **On-screen text.** Whisper hears; it does not see. Burned-in captions and
+  overlay text need OCR, which is a separate service we do not currently run.
+- **Fetching media.** Downloading the file is your code's job.
+- **Speaker labels.** No diarization.
 
 ### Without any dependencies
 

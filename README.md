@@ -66,7 +66,8 @@ ml-capstone-platform/
 │   ├── verify-provisioning.sh     Post-provision check: GitHub + Coolify state per roster row (runs on rigel)
 │   ├── invite-to-org.sh           Invite roster users to the byu-ml-capstone GitHub org (runs on laptop)
 │   ├── provision-gh-teams.sh      Create GitHub Teams mirroring Coolify teams + add members (runs on laptop)
-│   └── repatch-coolify.sh         Reapply the private-github-app team-scoping fix (upstream #11449) after Coolify updates (runs on rigel)
+│   ├── repatch-coolify.sh         Reapply the private-github-app team-scoping fix (upstream #11449) after Coolify updates (runs on rigel)
+│   └── install-whisper-service.sh Stand up shared speech-to-text + register it with LiteLLM as `classroom-transcribe` (runs on rigel)
 ├── sentiment-test-app/    Reference app: LLM + local HF, base+app Docker split, integration tests
 ├── testing/
 │   └── test-playground/   Sandbox VS Code workspace to verify Continue + the classroom LLM before real use

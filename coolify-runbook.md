@@ -2,7 +2,7 @@
 
 This is the **server-side** setup guide for `rigel.cs.byu.edu`, the GPU-equipped front-end machine that hosts:
 
-- **LiteLLM** — the single proxy fronting the two GPU inference boxes (`castor`, `pollux`), exposed to students as `ml-capstone.cs.byu.edu:4000`
+- **LiteLLM** — the single proxy fronting the two GPU inference boxes (`castor`, `pollux`), exposed to students as `ml-capstone.cs.byu.edu:4000`. Also fronts a local speech-to-text service on rigel itself (`classroom-transcribe`)
 - **Coolify** — a self-hosted, GitHub-webhook-driven "push to deploy" platform students use for their class projects; admin UI at `ml-capstone-admin.cs.byu.edu` (live, publicly reachable via CS IT HAProxy, gated by GitHub OAuth invite-only signin)
 - **4× NVIDIA A6000 GPUs** — available to student Docker containers via Coolify for GPU-accelerated deploys
 
@@ -58,6 +58,8 @@ Only one path on `rigel` is reachable from the public internet: the GitHub webho
 |      TLS termination via CS-provided *.cs.byu.edu DigiCert wildcard           |
 |                                                                               |
 |  LiteLLM              :4000        chat + FIM pools -> castor, pollux         |
+|                                    transcription    -> whisper (local)        |
+|  speaches (whisper) 10.0.0.1:8020  faster-whisper on GPU 0, bridge-only       |
 |  Coolify UI           :8000                                                   |
 |  Coolify realtime     :6001                                                   |
 |  Coolify terminal     :6002                                                   |
@@ -129,6 +131,7 @@ Key points:
 | 80   | Traefik | Internal — VPN clients hitting HTTP student apps (redirects to 443 where applicable) |
 | 443  | Traefik | Internal — VPN clients hitting HTTPS student apps + admin UI |
 | 4000 | LiteLLM | Internal — students' editors |
+| 8020 | speaches (Whisper) | **Docker bridge only** (`10.0.0.1`) — not published on any external interface; reachable solely via LiteLLM |
 | 8000 | Coolify UI | Internal — VPN clients only |
 | 6001 | Coolify realtime | Internal |
 | 6002 | Coolify terminal | Internal |
@@ -246,7 +249,72 @@ docker run -d --name litellm \
   --config /app/config.yaml
 ```
 
-Verify from a workstation on VPN: `curl http://ml-capstone.cs.byu.edu:4000/v1/models` should list `classroom-chat` and `classroom-autocomplete`.
+Verify from a workstation on VPN: `curl http://ml-capstone.cs.byu.edu:4000/v1/models` should list `classroom-chat`, `classroom-autocomplete`, and `classroom-transcribe`.
+
+### 6b. Speech-to-text behind the same proxy
+
+LiteLLM already exposes `/v1/audio/transcriptions`; it only needs a model
+registered against it. The transcriber itself runs on rigel's own GPUs rather
+than on castor/pollux — Whisper is small enough that it does not warrant a
+vLLM host.
+
+Everything is handled by [`scripts/install-whisper-service.sh`](scripts/install-whisper-service.sh),
+which is idempotent and safe to re-run:
+
+```bash
+scripts/install-whisper-service.sh            # install; prompts before restarting LiteLLM
+scripts/install-whisper-service.sh --check    # read-only state report
+scripts/install-whisper-service.sh --rollback # remove the entry, restart, drop the container
+```
+
+What it stands up:
+
+| | |
+|---|---|
+| Container | `whisper`, image `ghcr.io/speaches-ai/speaches:latest-cuda` |
+| Engine | faster-whisper (CTranslate2) — the same engine the Python library uses |
+| Model | `Systran/faster-whisper-large-v3`, cached in the `whisper-hf-cache` named volume |
+| GPU | device 0; ~4.4 GB resident, unloaded after idle |
+| Bind | `10.0.0.1:8020` — the docker bridge, **not** loopback and not the VPN |
+| Alias | `classroom-transcribe` in `/etc/litellm/config.yaml` |
+
+The config entry it inserts:
+
+```yaml
+  - model_name: classroom-transcribe
+    litellm_params:
+      model: openai/Systran/faster-whisper-large-v3
+      api_base: http://10.0.0.1:8020/v1
+      api_key: sk-noauth
+    model_info:
+      mode: audio_transcription
+```
+
+> **The binding is the part that bites.** Publishing the container on
+> `127.0.0.1:8020` looks more secure and is what you reach for first, but a
+> host loopback port is invisible from inside another container — LiteLLM gets
+> `ECONNREFUSED`. It has to be the bridge address, which the script discovers
+> from `docker0` rather than hardcoding. Binding to the bridge is still not
+> VPN-reachable, so students can only arrive through LiteLLM.
+
+The script validates the edited YAML and restores its timestamped backup
+**without restarting LiteLLM** if the file does not parse, so a typo cannot
+take the chat service down. It also proves LiteLLM can reach the container
+before touching the config at all.
+
+**Swapping the model.** The image carries a registry of ~640 ASR models
+(`curl http://10.0.0.1:8020/v1/registry?task=automatic-speech-recognition`),
+pulled on demand by Hugging Face id. To move to a faster or language-specific
+one, download it and repoint the alias:
+
+```bash
+curl -X POST http://10.0.0.1:8020/v1/models/deepdml/faster-whisper-large-v3-turbo-ct2
+sudo $EDITOR /etc/litellm/config.yaml     # change the `model:` line
+sudo docker restart litellm
+```
+
+`large-v3-turbo` is roughly 4× faster at close to the same English quality.
+Nothing in the student-facing contract changes — the alias is stable.
 
 ---
 

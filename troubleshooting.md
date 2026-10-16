@@ -27,11 +27,34 @@ Almost always VPN. Test:
 curl -sS http://ml-capstone.cs.byu.edu:4000/v1/models
 ```
 
-Should return a JSON list including `classroom-chat` and `classroom-autocomplete`. If it fails:
+Should return a JSON list including `classroom-chat`, `classroom-autocomplete`, and `classroom-transcribe`. If it fails:
 
 - Connect / reconnect to `cs-vpn.byu.edu` via GlobalProtect
 - Try `nslookup ml-capstone.cs.byu.edu` — expect an internal IP (e.g., `10.55.x.x`)
 - If still broken, LiteLLM may be down — see admin section below
+
+### Transcription returns `Invalid model name passed in model=classroom-transcribe`
+
+The alias is not registered with LiteLLM. Confirm what the proxy is actually
+advertising:
+
+```bash
+curl -sS http://ml-capstone.cs.byu.edu:4000/v1/models
+```
+
+If `classroom-transcribe` is absent, that is an admin-side problem — on rigel,
+`scripts/install-whisper-service.sh --check` reports the whole chain
+(container, model weights, LiteLLM's view, and whether LiteLLM can reach the
+container). Coolify runbook §6b has the details.
+
+### A transcript contains text that was never spoken
+
+Working as designed, unfortunately. Whisper hallucinates on audio with no
+speech in it — a pure tone returns things like `"Thanks for watching!"` with a
+nonsense end timestamp. Use `response_format="verbose_json"` and discard
+segments whose `no_speech_prob` is above about `0.6`; real speech scores near
+`0.003`. `vad_filter` does **not** fix this. Full explanation in
+[Transcribing audio](research-students.md#transcribing-audio).
 
 ### GlobalProtect says "Connected" but nothing on the cluster resolves
 

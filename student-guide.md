@@ -125,7 +125,12 @@ Two model aliases exposed by the cluster's LiteLLM proxy:
 - `classroom-chat` — chat, refactoring, agentic edits
 - `classroom-autocomplete` — inline ghost-text (FIM)
 
-Both aliases stay stable even if your instructor swaps the underlying model.
+A third alias, `classroom-transcribe`, is speech-to-text (Whisper `large-v3`)
+on the same endpoint — useful if your project handles audio or video. Usage,
+and the one failure mode worth knowing about, are in
+[Transcribing audio](research-students.md#transcribing-audio).
+
+These aliases stay stable even if your instructor swaps the underlying model.
 
 **Endpoint** (VPN-only): `http://ml-capstone.cs.byu.edu:4000/v1`
 
