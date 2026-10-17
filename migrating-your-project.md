@@ -95,6 +95,17 @@ which Coolify does not read.
 
 *Violation:* `Bind for 0.0.0.0:8000 failed: port is already allocated`.
 
+**Exception: WebRTC media.** An app that streams WebRTC media may publish a
+UDP range assigned by the admin, one to one, and nothing else. Signaling still
+goes through Traefik on the app's domain. Assigned ranges on rigel:
+
+| App | Environment | Reserved | Published now |
+|---|---|---|---|
+| virtual-patient (`localsimli`, video avatar) | production | 40000-40099/udp | 40000-40015 |
+| virtual-patient (`localsimli`, video avatar) | staging | 40100-40199/udp | 40100-40107 |
+
+Ask the admin for a range before publishing one; don't use these.
+
 ### R3 — Every long-running service needs a `healthcheck:`
 
 Coolify judges the application by its containers' Docker health. A service with no
